@@ -1,5 +1,5 @@
 // Minimal offline cache so Tengen works after first load / on the home screen.
-const CACHE = "tengen-v1";
+const CACHE = "tengen-v2";
 const ASSETS = [
   "./", "./index.html", "./styles.css",
   "./js/app.js", "./js/engine.js", "./js/ai.js",
