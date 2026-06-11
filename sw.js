@@ -1,5 +1,6 @@
-// Minimal offline cache so Tengen works after first load / on the home screen.
-const CACHE = "tengen-v2";
+// Offline cache for Tengen. Network-first so code updates always show on
+// reload when online, with a cache fallback when offline / on the home screen.
+const CACHE = "tengen-v3";
 const ASSETS = [
   "./", "./index.html", "./styles.css",
   "./js/app.js", "./js/engine.js", "./js/ai.js",
@@ -17,11 +18,15 @@ self.addEventListener("activate", (e) => {
 });
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
+  // Network-first: always try the network and refresh the cache; fall back to
+  // the cached copy (then the app shell) only when offline.
   e.respondWith(
-    caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {
-      const copy = res.clone();
-      caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
-      return res;
-    }).catch(() => caches.match("./index.html")))
+    fetch(e.request)
+      .then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+        return res;
+      })
+      .catch(() => caches.match(e.request).then((hit) => hit || caches.match("./index.html")))
   );
 });
