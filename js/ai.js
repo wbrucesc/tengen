@@ -118,3 +118,54 @@ function givesAtari(go, x, y, color) {
   go.board[go.idx(x, y)] = EMPTY;
   return atari;
 }
+
+// Deterministic "best move" with a beginner-friendly explanation, for the
+// Hint button. Same priorities as the bot, but no randomness and it always
+// tells you WHY.
+export function suggest(go, color) {
+  const moves = legalMoves(go, color);
+  if (!moves.length)
+    return { pass: true, reason: "There are no useful moves left here — passing is the right call." };
+
+  // 1) Capture something now.
+  const caps = moves.filter((m) => m.captures > 0).sort((a, b) => b.captures - a.captures);
+  if (caps.length) {
+    const n = caps[0].captures;
+    return { ...caps[0], reason: `This captures ${n > 1 ? n + " stones" : "a stone"} immediately — it had no liberties left.` };
+  }
+
+  // 2) Rescue your own group that's in atari.
+  const myAtari = go.atariGroups().filter((g) => g.color === color);
+  if (myAtari.length) {
+    const escapes = moves
+      .map((m) => ({ ...m, libs: libsAfter(go, m.x, m.y, color) }))
+      .filter((m) => m.libs >= 2 && touchesGroup(go, m, myAtari))
+      .sort((a, b) => b.libs - a.libs);
+    if (escapes.length)
+      return { ...escapes[0], reason: "This saves your group that was about to be captured — it was down to its last liberty." };
+  }
+
+  // 3) Put an opponent group in atari (threaten a capture).
+  const aggressive = moves.filter((m) => givesAtari(go, m.x, m.y, color) && libsAfter(go, m.x, m.y, color) >= 2);
+  if (aggressive.length)
+    return { ...aggressive[0], reason: "This puts one of your opponent's groups in atari — it threatens to capture them next turn." };
+
+  // 4) A solid building move.
+  const c = (go.size - 1) / 2;
+  const scored = moves
+    .filter((m) => libsAfter(go, m.x, m.y, color) >= 2)
+    .map((m) => {
+      const centre = -(Math.abs(m.x - c) + Math.abs(m.y - c));
+      const contact = neighborStones(go, m.x, m.y);
+      return { ...m, contact, s: centre * 0.5 + contact * 1.5 };
+    })
+    .sort((a, b) => b.s - a.s);
+  if (scored.length) {
+    const best = scored[0];
+    const reason = best.contact > 0
+      ? "This strengthens your position by building right next to your existing stones."
+      : "This takes a valuable open point to start marking out your own area.";
+    return { ...best, reason };
+  }
+  return { pass: true, reason: "Nothing stands out — passing is reasonable here." };
+}

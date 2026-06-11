@@ -108,11 +108,26 @@ h1 { font-size: 2.6rem; margin: .2em 0 0; letter-spacing: .22em; }
 }
 .flash {
   position: absolute; top: 10px; left: 50%; transform: translateX(-50%) translateY(-8px);
-  background: var(--orange); color: var(--cream); padding: 7px 14px; border-radius: 999px;
+  background: var(--orange); color: var(--cream); padding: 8px 16px; border-radius: 16px;
   font-size: .8rem; font-weight: 700; opacity: 0; transition: opacity .2s, transform .2s;
   border: 2px solid var(--ink); pointer-events: none;
+  max-width: 84%; white-space: normal; text-align: center; line-height: 1.35;
+  box-shadow: 0 4px 0 rgba(33,30,24,.3);
 }
 .flash.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.flash.hint { background: var(--green); }
+
+/* utility */
+.gone { display: none !important; }
+
+/* capture-go objective banner */
+.objective {
+  display: none; align-self: center; margin: -2px 0 2px;
+  background: var(--green); color: var(--cream); border: 2px solid var(--ink);
+  padding: 6px 16px; border-radius: 999px; font-size: .82rem; font-weight: 700;
+  box-shadow: 0 4px 0 var(--green-d);
+}
+.objective.show { display: block; }
 .estimate {
   position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
   font-size: .78rem; font-weight: 700; background: var(--paper-2);

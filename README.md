@@ -19,8 +19,12 @@ server. Open `index.html` and play.
 
 - Full, correct **Go rules engine** — captures, suicide rule, **positional
   superko**, two-pass end, Chinese (area) scoring. (Headless-tested.)
+- **Capture Go on-ramp** — a "first to capture a stone wins" mode (the proven
+  way to teach Go in five minutes), plus the full **territory** game.
 - **9×9 / 13×13 / 19×19** boards. 9×9 is the default beginner on-ramp.
 - **Pass & play** (two humans) or **vs computer** at three gentle levels.
+- **Teaching hints** — the Hint button suggests a move *and explains why*
+  ("this puts a group in atari — it threatens to capture next turn").
 - Beginner aids that most apps lack:
   - **Live territory heatmap** — toggle it to *see* whose ground is whose, with
     a running "Black +3.5 / White +6.5" estimate. (Territory is the #1 thing

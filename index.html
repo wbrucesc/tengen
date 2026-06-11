@@ -25,6 +25,12 @@
     </header>
 
     <section class="card">
+      <h2>game type</h2>
+      <div class="row" role="group" aria-label="Game type">
+        <button class="btn chip sel" data-variant="capture">capture go<small>best for learning</small></button>
+        <button class="btn chip" data-variant="territory">territory<small>the full game</small></button>
+      </div>
+
       <h2>board</h2>
       <div class="row" role="group" aria-label="Board size">
         <button class="btn chip sel" data-size="9">9 × 9<small>quick</small></button>
@@ -56,8 +62,8 @@
     </section>
 
     <footer class="hint-foot">
-      tip: turn on <b>territory</b> mid-game to see who’s ahead — the shaded
-      areas show whose ground is whose.
+      tip: new to Go? start with <b>capture go</b> — first to capture a stone
+      wins. Tap <b>hint</b> any time and it’ll explain the idea behind the move.
     </footer>
   </main>
 
@@ -74,6 +80,8 @@
         <span class="cap"><span class="pip white"></span><b id="cap-w">0</b></span>
       </div>
     </header>
+
+    <div id="objective" class="objective"></div>
 
     <div id="board-wrap">
       <canvas id="board"></canvas>

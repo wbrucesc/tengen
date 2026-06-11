@@ -1,6 +1,6 @@
 // app.js — UI, rendering, interaction, sound. Wires the engine to the screen.
 import { Go, EMPTY, BLACK, WHITE, other, KOMI } from "./engine.js";
-import { chooseMove } from "./ai.js";
+import { chooseMove, suggest } from "./ai.js";
 
 const $ = (sel) => document.querySelector(sel);
 const canvas = $("#board");
@@ -21,6 +21,7 @@ const C = {
 // ---- Game state ------------------------------------------------------------
 const state = {
   go: null,
+  variant: "capture",    // "capture" (first-capture-wins on-ramp) | "territory"
   mode: "computer",      // "computer" | "friend"
   human: BLACK,          // which color the human plays in computer mode
   level: "easy",
@@ -269,11 +270,13 @@ function updateHud() {
 // ---- Move handling ---------------------------------------------------------
 function place(x, y) {
   const go = state.go;
+  const mover = go.turn;
   const res = go.play(x, y);
   if (!res.ok) { flash(res.reason); buzz(30); return false; }
   state.candidate = null; state.hint = null;
   clack(res.captures.length ? "capture" : "place"); buzz(res.captures.length ? 22 : 10);
   for (const s of res.captures) state.anims.push({ x: s % go.size, y: (s / go.size) | 0, t: performance.now() });
+  if (state.variant === "capture" && res.captures.length) { captureWin(mover); return true; }
   afterMove();
   return true;
 }
@@ -290,13 +293,15 @@ function afterMove() {
 function aiMove() {
   const go = state.go;
   if (go.ended) { state.busy = false; return; }
+  const mover = go.turn;
   const m = chooseMove(go, go.turn, state.level);
-  if (m.pass) { go.pass(); clack("place"); if (go.ended) enterScoring(); }
+  if (m.pass) { go.pass(); clack("place"); }
   else {
     const res = go.play(m.x, m.y);
     if (res.ok) {
       clack(res.captures.length ? "capture" : "place");
       for (const s of res.captures) state.anims.push({ x: s % go.size, y: (s / go.size) | 0, t: performance.now() });
+      if (state.variant === "capture" && res.captures.length) { captureWin(mover); return; }
     }
   }
   state.busy = false;
@@ -304,9 +309,27 @@ function aiMove() {
   if (go.ended) enterScoring();
 }
 
-function flash(msg) {
-  const el = $("#flash"); el.textContent = msg; el.classList.add("show");
-  clearTimeout(flash._t); flash._t = setTimeout(() => el.classList.remove("show"), 1200);
+// Capture Go: the first player to capture any stone wins immediately.
+function captureWin(winner) {
+  state.go.ended = true; state.busy = false;
+  state.candidate = null; state.hint = null;
+  const who = winner === BLACK ? "Black" : "White";
+  const youWon = state.mode === "computer" && winner === state.human;
+  buzz(40); clack("capture");
+  const r2 = $("#score-result2");
+  if (r2) r2.innerHTML = `<span class="win">${who} wins!</span><br>first capture 🎯` +
+    (state.mode === "computer"
+      ? `<br><small>${youWon ? "nice — you snagged the first stone!" : "the computer captured first — go again!"}</small>`
+      : "");
+  $("#score-final").classList.add("show");
+  updateHud();
+}
+
+function flash(msg, kind = "error") {
+  const el = $("#flash"); el.textContent = msg;
+  el.className = "flash show" + (kind === "hint" ? " hint" : "");
+  clearTimeout(flash._t);
+  flash._t = setTimeout(() => el.classList.remove("show"), kind === "hint" ? 4800 : 1200);
 }
 
 // ---- Interaction -----------------------------------------------------------
@@ -381,6 +404,19 @@ function newGame(opts) {
   state.go = new Go(opts.size);
   state.candidate = null; state.hint = null;
   state.scoring = false; state.dead = new Set(); state.reveal = 0; state.busy = false;
+
+  // Capture Go vs full territory game: adjust the board chrome.
+  const cap = state.variant === "capture";
+  if (cap) state.showTerritory = false;
+  const tg = $("#t-territory");
+  tg.classList.toggle("gone", cap);
+  tg.classList.toggle("on", state.showTerritory);
+  $("#pass-btn").classList.toggle("gone", cap);
+  const obj = $("#objective");
+  obj.classList.toggle("show", cap);
+  obj.textContent = "🎯 First to capture a stone wins";
+
+  $("#score-final").classList.remove("show");
   $("#score-panel").classList.remove("show");
   $("#play-actions").classList.remove("hidden");
   $("#menu").classList.remove("show");
@@ -401,7 +437,9 @@ function wireUi() {
   });
 
   // Menu: board size + opponent selection
-  let sel = { size: 9, mode: "computer", level: "easy", human: BLACK };
+  let sel = { variant: "capture", size: 9, mode: "computer", level: "easy", human: BLACK };
+  document.querySelectorAll("[data-variant]").forEach((b) =>
+    b.addEventListener("click", () => { sel.variant = b.dataset.variant; markGroup("[data-variant]", b); }));
   document.querySelectorAll("[data-size]").forEach((b) =>
     b.addEventListener("click", () => { sel.size = +b.dataset.size; markGroup("[data-size]", b); }));
   document.querySelectorAll("[data-mode]").forEach((b) =>
@@ -431,9 +469,10 @@ function wireUi() {
   });
   $("#hint-btn").addEventListener("click", () => {
     if (state.busy || state.go.ended) return;
-    const m = chooseMove(state.go, state.go.turn, "steady");
+    const m = suggest(state.go, state.go.turn);
     state.hint = m.pass ? null : { x: m.x, y: m.y };
-    if (!m.pass) buzz(8);
+    flash(m.reason, "hint");
+    buzz(8);
   });
 
   // Toggles
@@ -448,7 +487,7 @@ function wireUi() {
   });
   $("#rematch-btn").addEventListener("click", () => {
     $("#score-final").classList.remove("show");
-    newGame({ size: state.go.size, mode: state.mode, level: state.level, human: state.human });
+    newGame({ variant: state.variant, size: state.go.size, mode: state.mode, level: state.level, human: state.human });
   });
   $("#menu-btn").addEventListener("click", () => {
     $("#game").classList.remove("show"); $("#menu").classList.add("show");
