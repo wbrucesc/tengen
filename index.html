@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#efe7d3" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Tengen" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon.svg" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="styles.css" />
+  <title>Tengen · Go, made friendly</title>
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+
+  <!-- ===================== MENU ===================== -->
+  <main id="menu" class="screen show">
+    <header class="brand">
+      <div class="logo">天元</div>
+      <h1>TENGEN</h1>
+      <p class="tag">the ancient game of Go — made friendly</p>
+    </header>
+
+    <section class="card">
+      <h2>board</h2>
+      <div class="row" role="group" aria-label="Board size">
+        <button class="btn chip sel" data-size="9">9 × 9<small>quick</small></button>
+        <button class="btn chip" data-size="13">13 × 13<small>medium</small></button>
+        <button class="btn chip" data-size="19">19 × 19<small>full</small></button>
+      </div>
+
+      <h2>opponent</h2>
+      <div class="row" role="group" aria-label="Opponent">
+        <button class="btn chip sel" data-mode="computer">computer</button>
+        <button class="btn chip" data-mode="friend">pass &amp; play</button>
+      </div>
+
+      <div id="level-row">
+        <h2>level</h2>
+        <div class="row" role="group" aria-label="Computer level">
+          <button class="btn chip" data-level="gentle">gentle</button>
+          <button class="btn chip sel" data-level="easy">easy</button>
+          <button class="btn chip" data-level="steady">steady</button>
+        </div>
+        <h2>you play</h2>
+        <div class="row" role="group" aria-label="Your color">
+          <button class="btn chip sel" data-color="1"><span class="pip black"></span>black<small>first</small></button>
+          <button class="btn chip" data-color="2"><span class="pip white"></span>white<small>+komi</small></button>
+        </div>
+      </div>
+
+      <button id="start" class="btn primary big">start game</button>
+    </section>
+
+    <footer class="hint-foot">
+      tip: turn on <b>territory</b> mid-game to see who’s ahead — the shaded
+      areas show whose ground is whose.
+    </footer>
+  </main>
+
+  <!-- ===================== GAME ===================== -->
+  <main id="game" class="screen">
+    <header class="hud">
+      <button id="menu-btn" class="btn mini">☰</button>
+      <div class="status">
+        <span id="turn-dot" class="dot black"></span>
+        <span id="turn">Black to play</span>
+      </div>
+      <div class="caps">
+        <span class="cap"><span class="pip black"></span><b id="cap-b">0</b></span>
+        <span class="cap"><span class="pip white"></span><b id="cap-w">0</b></span>
+      </div>
+    </header>
+
+    <div id="board-wrap">
+      <canvas id="board"></canvas>
+      <div id="flash" class="flash"></div>
+      <div id="estimate" class="estimate"></div>
+    </div>
+
+    <div class="toggles">
+      <button id="t-territory" class="btn toggle">territory</button>
+      <button id="t-atari" class="btn toggle">atari ⚠</button>
+      <button id="t-confirm" class="btn toggle">confirm</button>
+    </div>
+
+    <nav id="play-actions" class="actions">
+      <button id="confirm-btn" class="btn primary">place ●</button>
+      <button id="pass-btn" class="btn">pass</button>
+      <button id="undo-btn" class="btn">undo</button>
+      <button id="hint-btn" class="btn green">hint</button>
+    </nav>
+
+    <!-- scoring -->
+    <section id="score-panel" class="score">
+      <p class="score-help">Tap any dead group to remove it, then finish.</p>
+      <div id="score-result" class="score-result"></div>
+      <button id="finish-btn" class="btn primary big">show result</button>
+    </section>
+  </main>
+
+  <!-- final overlay -->
+  <div id="score-final" class="overlay">
+    <div class="overlay-card">
+      <h2>result</h2>
+      <div id="score-result2" class="score-result"></div>
+      <div class="row">
+        <button id="rematch-btn" class="btn primary">rematch</button>
+        <button id="score-menu-btn" class="btn">menu</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+    }
+  </script>
+</body>
+</html>

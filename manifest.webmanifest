@@ -1,0 +1,14 @@
+{
+  "name": "Tengen — Go, made friendly",
+  "short_name": "Tengen",
+  "description": "A friendly, mobile-first way to learn and play the ancient game of Go (Baduk / Weiqi).",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#efe7d3",
+  "theme_color": "#efe7d3",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
