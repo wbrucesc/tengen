@@ -30,6 +30,7 @@ const state = {
   confirmMoves: true,
   candidate: null,       // {x,y} pending confirmation
   hint: null,            // {x,y} suggested
+  inspect: null,         // group inspector result {stones,libPoints,eyePoints,...}
   scoring: false,        // in end-of-game dead-stone marking
   dead: new Set(),
   reveal: 0,             // 0..1 territory-fill animation progress
@@ -177,6 +178,28 @@ function draw(now = 0) {
     ctx.beginPath(); ctx.arc(toPx(lm.x), toPx(lm.y), cell * 0.12, 0, 7); ctx.fill();
   }
 
+  // Group inspector highlights: ring the group, dot its liberties, mark eyes.
+  if (state.inspect && !state.scoring) {
+    const ins = state.inspect;
+    ctx.strokeStyle = C.green; ctx.lineWidth = cell * 0.05;
+    for (const s of ins.stones) {
+      const x = s % size, y = (s / size) | 0;
+      ctx.beginPath(); ctx.arc(toPx(x), toPx(y), r + cell * 0.07, 0, 7); ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(31,74,58,.55)";
+    for (const li of ins.libPoints) {
+      const x = li % size, y = (li / size) | 0;
+      ctx.beginPath(); ctx.arc(toPx(x), toPx(y), cell * 0.12, 0, 7); ctx.fill();
+    }
+    for (const ep of ins.eyePoints) {
+      const x = ep % size, y = (ep / size) | 0;
+      ctx.fillStyle = C.orange;
+      ctx.beginPath(); ctx.arc(toPx(x), toPx(y), cell * 0.17, 0, 7); ctx.fill();
+      ctx.fillStyle = C.cream;
+      ctx.beginPath(); ctx.arc(toPx(x), toPx(y), cell * 0.07, 0, 7); ctx.fill();
+    }
+  }
+
   // Hint marker
   if (state.hint) {
     ctx.strokeStyle = C.green; ctx.lineWidth = cell * 0.08;
@@ -273,7 +296,7 @@ function place(x, y) {
   const mover = go.turn;
   const res = go.play(x, y);
   if (!res.ok) { flash(res.reason); buzz(30); return false; }
-  state.candidate = null; state.hint = null;
+  state.candidate = null; state.hint = null; clearInspect();
   clack(res.captures.length ? "capture" : "place"); buzz(res.captures.length ? 22 : 10);
   for (const s of res.captures) state.anims.push({ x: s % go.size, y: (s / go.size) | 0, t: performance.now() });
   if (state.variant === "capture" && res.captures.length) { captureWin(mover); return true; }
@@ -335,13 +358,40 @@ function flash(msg, kind = "error") {
 // ---- Interaction -----------------------------------------------------------
 let pressing = false;
 function onDown(e) {
-  if (state.busy || state.go.ended) { if (state.scoring) onScoreTap(e); return; }
+  if (state.scoring) { onScoreTap(e); return; }
+  if (state.busy || state.go.ended) return;
   audio();
-  pressing = true;
   const p = pointer(e);
   const hit = nearest(p.x, p.y);
+  // Tapping an existing stone inspects its group instead of placing.
+  if (hit && state.go.get(hit.x, hit.y) !== EMPTY) {
+    showInspect(hit.x, hit.y); pressing = false; e.preventDefault(); return;
+  }
+  clearInspect();
+  pressing = true;
   if (hit) { state.candidate = hit; updateHud(); }
   e.preventDefault();
+}
+
+function showInspect(x, y) {
+  const d = state.go.inspect(x, y);
+  if (!d) return;
+  state.inspect = d; state.candidate = null;
+  buzz(8); clack("place");
+  const label = d.color === BLACK ? "Black group" : "White group";
+  const badge = { alive: "✓ alive", atari: "⚠ atari", "one-eye": "one eye", unsettled: "unsettled" }[d.status];
+  $("#inspect").innerHTML =
+    `<div class="ins-head"><b>${label}</b> · ${d.libs} liberties · ${d.eyes} eye${d.eyes === 1 ? "" : "s"}` +
+    `<span class="ins-badge ${d.status}">${badge}</span></div>` +
+    `<div class="ins-text">${d.text}</div><div class="ins-dismiss">tap to dismiss</div>`;
+  $("#inspect").classList.add("show");
+  updateHud();
+}
+
+function clearInspect() {
+  if (!state.inspect) return;
+  state.inspect = null;
+  $("#inspect").classList.remove("show");
 }
 function onMove(e) {
   if (!pressing || state.busy) return;
@@ -402,7 +452,7 @@ function updateScorePanel() {
 function newGame(opts) {
   Object.assign(state, opts);
   state.go = new Go(opts.size);
-  state.candidate = null; state.hint = null;
+  state.candidate = null; state.hint = null; clearInspect();
   state.scoring = false; state.dead = new Set(); state.reveal = 0; state.busy = false;
 
   // Capture Go vs full territory game: adjust the board chrome.
@@ -496,6 +546,9 @@ function wireUi() {
     $("#score-final").classList.remove("show"); $("#score-panel").classList.remove("show");
     $("#game").classList.remove("show"); $("#menu").classList.add("show");
   });
+
+  // Inspector panel: tap anywhere on it to dismiss.
+  $("#inspect").addEventListener("click", clearInspect);
 
   // Canvas input
   canvas.addEventListener("pointerdown", onDown);

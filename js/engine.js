@@ -180,6 +180,57 @@ export class Go {
     return out;
   }
 
+  // --- Group inspector (beginner teaching aid) -----------------------------
+  // Reads a group's liberties, real eyes, and life/death status in plain terms.
+  // Honest by design: it only declares "alive" on two genuine eyes (which is
+  // always-alive); everything else is framed as guidance, not a verdict.
+  inspect(x, y) {
+    const color = this.get(x, y);
+    if (color === EMPTY) return null;
+    const g = this.group(x, y);
+    const stoneSet = new Set(g.stones);
+    const libPoints = [...g.libs];
+
+    // A real eye = an empty liberty surrounded orthogonally by this group, with
+    // enough diagonal control that the opponent can't undermine it (false-eye
+    // test: at most one hostile diagonal off the edge, none on the edge).
+    const eyePoints = [];
+    for (const li of g.libs) {
+      const ex = li % this.size, ey = (li / this.size) | 0;
+      let surrounded = true;
+      for (const [nx, ny] of this.neighbors(ex, ey)) {
+        if (!stoneSet.has(this.idx(nx, ny))) { surrounded = false; break; }
+      }
+      if (!surrounded) continue;
+      let badDiag = 0, edge = false;
+      for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+        const ax = ex + dx, ay = ey + dy;
+        if (!this.inBounds(ax, ay)) { edge = true; continue; }
+        if (this.board[this.idx(ax, ay)] !== color) badDiag++;
+      }
+      if (edge ? badDiag === 0 : badDiag <= 1) eyePoints.push(li);
+    }
+
+    const eyes = eyePoints.length;
+    const libs = g.libs.size;
+    const atari = libs === 1;
+    let status, text;
+    if (eyes >= 2) {
+      status = "alive";
+      text = `This group has ${eyes} real eyes, so it's alive — it can never be captured. Two eyes is permanent life; you don't need to defend it.`;
+    } else if (atari) {
+      status = "atari";
+      text = `This group is in atari — only one liberty left! One more enemy stone captures it. Play on its last liberty to escape, or capture something back.`;
+    } else if (eyes === 1) {
+      status = "one-eye";
+      text = `This group has one eye but needs two to be unconditionally alive. Look for a way to make a second eye — or your opponent may be able to kill it.`;
+    } else {
+      status = "unsettled";
+      text = `This group has ${libs} liberties and no eyes yet, so it isn't safe on its own. It needs to make eye shape, connect to a living group, or run into open space.`;
+    }
+    return { color, stones: g.stones, libPoints, eyePoints, eyes, libs, atari, status, text };
+  }
+
   // --- Scoring -------------------------------------------------------------
   // Area scoring (Chinese): stones on board + surrounded empty territory.
   // `dead` is a Set of board indices marked dead (removed before counting).

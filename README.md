@@ -30,6 +30,9 @@ server. Open `index.html` and play.
     a running "Black +3.5 / White +6.5" estimate. (Territory is the #1 thing
     beginners can't see.)
   - **Atari warnings** — groups with one liberty left pulse orange.
+  - **Group inspector** — tap any stone mid-game to learn whether its group is
+    alive, in atari, or unsettled, with its liberties dotted and real eyes
+    marked. Plain-language, and honest (only calls "alive" on two real eyes).
   - **Tap-to-confirm** placement with a ghost stone + magnified aim, so you
     never fumble a stone onto the wrong point.
   - **Undo** and **Hint**.
@@ -78,7 +81,12 @@ icons/icon.svg          app icon
 
 ## Roadmap
 
-See the "Build plan" section of [`RESEARCH.md`](RESEARCH.md). Near-term: a
-gamified **learn path** (Capture Go → first real games), per-move "why was that
-group dead?" explanations, and an adaptive-handicap bot that shrinks the
-handicap as you improve.
+See the "Build plan" section of [`RESEARCH.md`](RESEARCH.md). Done so far:
+Capture Go on-ramp ✓, explained hints ✓, group inspector ✓. Near-term: an
+**adaptive-handicap** bot that shrinks the handicap as you improve, and a
+gamified **learn path**.
+
+Online **"play a friend"** multiplayer (room codes, then async with "your turn"
+notifications) is specced in [`MULTIPLAYER.md`](MULTIPLAYER.md) — the
+deterministic engine makes it a move-syncing problem, and the plan keeps the
+game loop transport-agnostic so it drops in cleanly.

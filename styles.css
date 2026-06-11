@@ -135,6 +135,25 @@ h1 { font-size: 2.6rem; margin: .2em 0 0; letter-spacing: .22em; }
 }
 .estimate:empty { display: none; }
 
+/* group inspector panel */
+.inspect {
+  position: absolute; left: 8px; right: 8px; bottom: 8px;
+  display: none; background: var(--paper); border: 2px solid var(--ink);
+  border-radius: 14px; padding: 11px 13px 9px; text-align: left;
+  box-shadow: 0 6px 0 rgba(33,30,24,.28); cursor: pointer; z-index: 4;
+}
+.inspect.show { display: block; animation: pop .14s ease-out; }
+@keyframes pop { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
+.ins-head { font-size: .82rem; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ins-badge {
+  margin-left: auto; font-size: .68rem; font-weight: 700; padding: 2px 8px;
+  border-radius: 999px; border: 1.5px solid var(--ink); background: var(--paper-2);
+}
+.ins-badge.alive { background: var(--green); color: var(--cream); }
+.ins-badge.atari { background: var(--orange); color: var(--cream); }
+.ins-text { font-size: .8rem; line-height: 1.4; margin-top: 6px; opacity: .9; }
+.ins-dismiss { font-size: .62rem; text-transform: uppercase; letter-spacing: .12em; opacity: .45; margin-top: 7px; text-align: center; }
+
 .toggles { display: flex; gap: 8px; }
 .toggles .btn { flex: 1; }
 .btn.toggle { background: var(--paper-2); font-size: .82rem; padding: 11px 6px; opacity: .65; }
