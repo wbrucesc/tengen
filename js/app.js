@@ -559,7 +559,9 @@ function launchOnlineGame(transport, settings) {
 
 // ---- Menu / lifecycle ------------------------------------------------------
 function newGame(opts) {
-  if (state.transport && state.transport !== opts.transport) {
+  // Starting a local game (computer/friend) tears down any lingering online
+  // transport. Online launches keep the transport that launchOnlineGame set.
+  if (opts.mode !== "online" && state.transport) {
     state.transport.disconnect(); state.transport = null;
   }
   Object.assign(state, opts);
