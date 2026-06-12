@@ -366,8 +366,19 @@ function handleOnlineGameEnd(game) {
     `<span class="win">${winColor} wins by resignation</span><br>` +
     `<small>${won ? "Your opponent resigned." : "You resigned."}</small>`;
   $("#score-final").classList.add("show");
-  if (state.transport) { state.transport.disconnect(); state.transport = null; }
+  // Keep the transport alive so either player can still tap Rematch.
   updateHud();
+}
+
+// Both clients restart together on the same room with swapped colors.
+function startRematch({ color }) {
+  if (state.go) state.go._resignHandled = false;
+  newGame({
+    variant: state.variant,
+    size: state.go.size,
+    mode: "online",
+    human: color,
+  });
 }
 
 function captureWin(winner) {
@@ -517,6 +528,7 @@ function openLobby(sel) {
             launchOnlineGame(t, sel);
           },
           onGameEnd: handleOnlineGameEnd,
+          onRematch: startRematch,
           onConnLost: () => flash("Connection lost — please refresh"),
         });
         $("#lobby-code").textContent = t.code;
@@ -535,6 +547,7 @@ function openLobby(sel) {
           onMove: applyRemoteMove,
           onOpponentJoined: () => {},
           onGameEnd: handleOnlineGameEnd,
+          onRematch: startRematch,
           onConnLost: () => flash("Connection lost — please refresh"),
         });
         closeLobby();
@@ -587,7 +600,7 @@ function newGame(opts) {
   $("#resign-btn").classList.toggle("gone", !isOnline);
 
   const rematchBtn = $("#rematch-btn");
-  if (rematchBtn) rematchBtn.textContent = isOnline ? "new game" : "rematch";
+  if (rematchBtn) rematchBtn.textContent = "rematch";
 
   $("#score-final").classList.remove("show");
   $("#score-panel").classList.remove("show");
@@ -709,9 +722,9 @@ function wireUi() {
   });
   $("#rematch-btn").addEventListener("click", () => {
     if (state.mode === "online") {
-      if (state.transport) { state.transport.disconnect(); state.transport = null; }
-      $("#score-final").classList.remove("show");
-      $("#game").classList.remove("show"); $("#menu").classList.add("show");
+      if (!state.transport) return;
+      state.transport.requestRematch().catch(() => flash("Couldn't start rematch — check connection"));
+      flash("Starting rematch…", "hint");
       return;
     }
     $("#score-final").classList.remove("show");

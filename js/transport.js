@@ -44,6 +44,7 @@ export class OnlineTransport {
     this._cbs = {};
     this._timer = null;
     this._lastId = 0;        // highest moves.id applied so far
+    this._round = 1;         // increments on each rematch
     this._joinedSeen = false;
     this._ended = false;
   }
@@ -87,9 +88,9 @@ export class OnlineTransport {
     );
   }
 
-  // Begin polling for opponent-join, incoming moves, and game end.
-  subscribe({ onMove, onOpponentJoined, onGameEnd, onConnLost }) {
-    this._cbs = { onMove, onOpponentJoined, onGameEnd, onConnLost };
+  // Begin polling for opponent-join, incoming moves, rematch, and game end.
+  subscribe({ onMove, onOpponentJoined, onGameEnd, onConnLost, onRematch }) {
+    this._cbs = { onMove, onOpponentJoined, onGameEnd, onConnLost, onRematch };
     this._poll();
     this._timer = setInterval(() => this._poll(), POLL_MS);
   }
@@ -112,7 +113,8 @@ export class OnlineTransport {
         }
       }
 
-      // New moves since the last we applied (ordered by the auto id).
+      // New rows since the last we applied (ordered by the auto id). A row with
+      // color 0 is a control row: a rematch signal carrying the new round in x.
       const { data: moves } = await c.from("moves")
         .select("id, color, x, y, is_pass")
         .eq("game_id", this._gameId)
@@ -120,6 +122,16 @@ export class OnlineTransport {
         .order("id", { ascending: true });
       if (moves) for (const m of moves) {
         if (m.id > this._lastId) this._lastId = m.id;
+        if (m.color === 0) {
+          // Rematch: swap seats and start fresh, once per new round.
+          if (m.x > this._round) {
+            this._round = m.x;
+            this._myColor = this._myColor === BLACK ? WHITE : BLACK;
+            this._ended = false;
+            this._cbs.onRematch?.({ color: this._myColor });
+          }
+          continue;
+        }
         if (m.color !== this._myColor) this._cbs.onMove?.(m);
       }
     } catch { /* transient network error — next tick retries */ }
@@ -149,6 +161,20 @@ export class OnlineTransport {
     try {
       await client().from("games").update({ status: "done", winner }).eq("id", this._gameId);
     } catch {}
+  }
+
+  // Ask for a rematch in the same room. Clears the game row back to "playing"
+  // and drops a control row (color 0) carrying the next round number; both
+  // clients pick it up on their next poll, swap colors, and restart together.
+  async requestRematch() {
+    const round = this._round + 1;
+    const c = client();
+    try { await c.from("games").update({ status: "playing", winner: null }).eq("id", this._gameId); } catch {}
+    const { error } = await c.from("moves").insert({
+      game_id: this._gameId, seq: this._randSeq(),
+      color: 0, x: round, y: null, is_pass: false,
+    });
+    if (error) throw new Error(error.message);
   }
 
   disconnect() {
