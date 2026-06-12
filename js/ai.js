@@ -120,52 +120,92 @@ function givesAtari(go, x, y, color) {
 }
 
 // Deterministic "best move" with a beginner-friendly explanation, for the
-// Hint button. Same priorities as the bot, but no randomness and it always
-// tells you WHY.
+// Hint button. Walks a priority ladder and names the specific idea behind the
+// move so the reason reads as intentional, never a vague fallback.
+function countStones(go) { let n = 0; for (let i = 0; i < go.board.length; i++) if (go.board[i] !== EMPTY) n++; return n; }
+function friendlyGroupCount(go, x, y, color) {
+  const ids = new Set();
+  for (const [nx, ny] of go.neighbors(x, y))
+    if (go.get(nx, ny) === color) { const g = go.group(nx, ny); ids.add(Math.min(...g.stones)); }
+  return ids.size;
+}
+function enemyNeighbors(go, x, y, color) {
+  let n = 0; for (const [nx, ny] of go.neighbors(x, y)) if (go.get(nx, ny) === other(color)) n++; return n;
+}
+function emptyNeighbors(go, x, y) {
+  let n = 0; for (const [nx, ny] of go.neighbors(x, y)) if (go.get(nx, ny) === EMPTY) n++; return n;
+}
+function openingPoints(size) {
+  const e = size <= 9 ? 2 : 3;            // 3-3 / star offset from the edge
+  const lo = e, hi = size - 1 - e, mid = (size - 1) / 2;
+  const corners = [[lo, lo], [hi, lo], [lo, hi], [hi, hi]];
+  const sides = size >= 13 ? [[mid, lo], [mid, hi], [lo, mid], [hi, mid]] : [];
+  return { corners, sides };
+}
+
 export function suggest(go, color) {
   const moves = legalMoves(go, color);
   if (!moves.length)
     return { pass: true, reason: "There are no useful moves left here — passing is the right call." };
+  const safe = (m) => libsAfter(go, m.x, m.y, color) >= 2;
 
-  // 1) Capture something now.
+  // 1) Capture something right now.
   const caps = moves.filter((m) => m.captures > 0).sort((a, b) => b.captures - a.captures);
   if (caps.length) {
     const n = caps[0].captures;
-    return { ...caps[0], reason: `This captures ${n > 1 ? n + " stones" : "a stone"} immediately — it had no liberties left.` };
+    return { ...caps[0], reason: `This captures ${n > 1 ? n + " stones" : "a stone"} immediately — they had no liberties left.` };
   }
 
   // 2) Rescue your own group that's in atari.
   const myAtari = go.atariGroups().filter((g) => g.color === color);
   if (myAtari.length) {
-    const escapes = moves
-      .map((m) => ({ ...m, libs: libsAfter(go, m.x, m.y, color) }))
+    const esc = moves.map((m) => ({ ...m, libs: libsAfter(go, m.x, m.y, color) }))
       .filter((m) => m.libs >= 2 && touchesGroup(go, m, myAtari))
       .sort((a, b) => b.libs - a.libs);
-    if (escapes.length)
-      return { ...escapes[0], reason: "This saves your group that was about to be captured — it was down to its last liberty." };
+    if (esc.length)
+      return { ...esc[0], reason: "This rescues your group that was in atari — it had just one liberty, and this gives it room to breathe again." };
   }
 
-  // 3) Put an opponent group in atari (threaten a capture).
-  const aggressive = moves.filter((m) => givesAtari(go, m.x, m.y, color) && libsAfter(go, m.x, m.y, color) >= 2);
-  if (aggressive.length)
-    return { ...aggressive[0], reason: "This puts one of your opponent's groups in atari — it threatens to capture them next turn." };
+  // 3) Put an opponent group in atari.
+  const atk = moves.filter((m) => safe(m) && givesAtari(go, m.x, m.y, color));
+  if (atk.length)
+    return { ...atk[0], reason: "This puts one of your opponent's groups in atari — down to its last liberty, so you threaten to capture it next turn." };
 
-  // 4) A solid building move.
+  // 4) Connect your own groups into one.
+  const conn = moves.filter((m) => safe(m) && friendlyGroupCount(go, m.x, m.y, color) >= 2)
+    .sort((a, b) => friendlyGroupCount(go, b.x, b.y, color) - friendlyGroupCount(go, a.x, a.y, color));
+  if (conn.length)
+    return { ...conn[0], reason: "This connects your stones into one solid group — joined stones share their liberties and can't be cut apart." };
+
+  // 5) Opening: claim an empty corner (then a side) while the board is open.
+  if (countStones(go) < go.size) {
+    const op = openingPoints(go.size);
+    for (const [px, py] of [...op.corners, ...op.sides]) {
+      if (go.get(px, py) !== EMPTY) continue;
+      if (!go.tryMove(px, py, color).ok) continue;
+      const isCorner = op.corners.some(([cx, cy]) => cx === px && cy === py);
+      return { x: px, y: py, reason: isCorner
+        ? "Corners are the easiest place to make secure territory, so grabbing one is among the best opening moves."
+        : "This takes a big point on the side, staking out a wide area while the board is still open." };
+    }
+  }
+
+  // 6) Press against the opponent to block their expansion (stay connected).
+  const press = moves.filter((m) => safe(m) && enemyNeighbors(go, m.x, m.y, color) >= 1 && friendlyGroupCount(go, m.x, m.y, color) >= 1)
+    .sort((a, b) => enemyNeighbors(go, b.x, b.y, color) - enemyNeighbors(go, a.x, a.y, color));
+  if (press.length)
+    return { ...press[0], reason: "This blocks your opponent from pushing further into your area, while staying linked to your own stones." };
+
+  // 7) Extend a group into open space.
+  const ext = moves.filter((m) => safe(m) && friendlyGroupCount(go, m.x, m.y, color) >= 1 && emptyNeighbors(go, m.x, m.y) >= 2)
+    .sort((a, b) => emptyNeighbors(go, b.x, b.y) - emptyNeighbors(go, a.x, a.y));
+  if (ext.length)
+    return { ...ext[0], reason: "This extends your group toward open space, giving it more liberties and a stronger shape." };
+
+  // 8) Last resort: a calm point near the centre to build a framework.
   const c = (go.size - 1) / 2;
-  const scored = moves
-    .filter((m) => libsAfter(go, m.x, m.y, color) >= 2)
-    .map((m) => {
-      const centre = -(Math.abs(m.x - c) + Math.abs(m.y - c));
-      const contact = neighborStones(go, m.x, m.y);
-      return { ...m, contact, s: centre * 0.5 + contact * 1.5 };
-    })
-    .sort((a, b) => b.s - a.s);
-  if (scored.length) {
-    const best = scored[0];
-    const reason = best.contact > 0
-      ? "This strengthens your position by building right next to your existing stones."
-      : "This takes a valuable open point to start marking out your own area.";
-    return { ...best, reason };
-  }
-  return { pass: true, reason: "Nothing stands out — passing is reasonable here." };
+  const open = moves.filter(safe).map((m) => ({ ...m, d: Math.abs(m.x - c) + Math.abs(m.y - c) })).sort((a, b) => a.d - b.d);
+  if (open.length)
+    return { ...open[0], reason: "This claims an open area to begin sketching out a framework of your own." };
+  return { pass: true, reason: "Nothing stands out here — passing is reasonable." };
 }
