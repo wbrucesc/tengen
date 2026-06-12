@@ -1,7 +1,7 @@
-// transport.js — Live multiplayer via Supabase Realtime Broadcast.
-// Room discovery uses the `games` table (codes); live signaling (moves, pass,
-// resign, opponent-joined) goes over a Broadcast channel, which works on any
-// Supabase project without database replication / publication setup.
+// transport.js — Live multiplayer via Supabase Realtime.
+// Room discovery uses the `games` table (codes); Presence tracks who's in the
+// room (opponent-joined), and Broadcast carries live moves/passes/resign —
+// both work on any Supabase project without database replication setup.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { BLACK, WHITE } from "./engine.js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
@@ -83,36 +83,39 @@ export class OnlineTransport {
     );
   }
 
-  // Subscribe to live events over a Broadcast channel.
+  // Subscribe to live events. Presence tracks who's in the room (so the host
+  // learns when the guest arrives, regardless of connect order); Broadcast
+  // carries the live moves/passes/resign.
   subscribe({ onMove, onOpponentJoined, onGameEnd, onConnLost }) {
     this._cbs = { onMove, onOpponentJoined, onGameEnd, onConnLost };
 
     this._channel = client().channel(`tengen:${this._gameId}`, {
-      config: { broadcast: { self: false } },
+      config: { broadcast: { self: false }, presence: { key: sessionId() } },
     });
+
+    // Host watches presence for the guest (color WHITE) showing up.
+    const checkPresence = () => {
+      if (this._myColor !== BLACK || this._joinedSeen) return;
+      const everyone = Object.values(this._channel.presenceState()).flat();
+      if (everyone.some((p) => p.color === WHITE)) {
+        this._joinedSeen = true;
+        this._cbs.onOpponentJoined?.({});
+      }
+    };
 
     this._channel
       .on("broadcast", { event: "move" }, ({ payload }) => {
         if (payload.color !== this._myColor) this._cbs.onMove?.(payload);
       })
-      .on("broadcast", { event: "joined" }, () => {
-        // Host learns the guest has arrived. Ack so a late-subscribing guest
-        // (who missed nothing here) and the host both settle into the game.
-        if (this._myColor === BLACK && !this._joinedSeen) {
-          this._joinedSeen = true;
-          this._channel.send({ type: "broadcast", event: "ack", payload: {} });
-          this._cbs.onOpponentJoined?.({});
-        }
-      })
       .on("broadcast", { event: "end" }, ({ payload }) => {
         this._cbs.onGameEnd?.(payload);
       })
-      .subscribe((status) => {
+      .on("presence", { event: "sync" }, checkPresence)
+      .on("presence", { event: "join" }, checkPresence)
+      .subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
-          // Guest announces itself once connected so the host can start.
-          if (this._myColor === WHITE) {
-            this._channel.send({ type: "broadcast", event: "joined", payload: {} });
-          }
+          // Announce our seat so the other side's presence sees us.
+          await this._channel.track({ color: this._myColor });
         } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           this._cbs.onConnLost?.();
         }
