@@ -119,6 +119,36 @@ h1 { font-size: 2.6rem; margin: .2em 0 0; letter-spacing: .22em; }
 
 /* utility */
 .gone { display: none !important; }
+.hidden { display: none !important; }
+
+/* ---------------- online / lobby ---------------- */
+#online-row { margin-top: 2px; }
+.online-note { font-size: .72rem; opacity: .55; text-align: center; margin: 6px 0 0; }
+
+/* room code input (join flow) */
+.code-input {
+  display: block; width: 100%; margin-top: 10px;
+  font: 700 1.45rem/1 ui-monospace, "SF Mono", "DejaVu Sans Mono", Menlo, monospace;
+  letter-spacing: .25em; text-transform: uppercase; text-align: center;
+  background: var(--cream); color: var(--ink);
+  border: 2px solid var(--ink); border-radius: var(--r);
+  padding: 12px 10px; outline: none;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,.07);
+  -webkit-user-select: auto; user-select: auto;
+}
+.code-input:focus { border-color: var(--orange); }
+.code-input::placeholder { opacity: .28; letter-spacing: .18em; }
+
+/* room code display in lobby */
+.room-code {
+  font: 700 2.1rem/1 ui-monospace, "SF Mono", "DejaVu Sans Mono", Menlo, monospace;
+  letter-spacing: .3em; padding: 14px 18px;
+  background: var(--ink); color: var(--cream);
+  border-radius: 14px; margin: 10px auto;
+  display: inline-block; -webkit-user-select: all; user-select: all;
+}
+.lobby-label { font-size: .8rem; opacity: .75; margin: 4px 0 6px; }
+.lobby-waiting { font-size: .82rem; opacity: .65; margin: 8px 0 0; }
 
 /* capture-go objective banner */
 .objective {

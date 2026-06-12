@@ -42,6 +42,7 @@
       <div class="row" role="group" aria-label="Opponent">
         <button class="btn chip sel" data-mode="computer">computer</button>
         <button class="btn chip" data-mode="friend">pass &amp; play</button>
+        <button class="btn chip" data-mode="online">online<small>🌐 live</small></button>
       </div>
 
       <div id="level-row">
@@ -56,6 +57,17 @@
           <button class="btn chip sel" data-color="1"><span class="pip black"></span>black<small>first</small></button>
           <button class="btn chip" data-color="2"><span class="pip white"></span>white<small>+komi</small></button>
         </div>
+      </div>
+
+      <div id="online-row" class="hidden">
+        <h2>online</h2>
+        <div class="row" role="group" aria-label="Online role">
+          <button class="btn chip sel" data-online-role="host">host<small>create room</small></button>
+          <button class="btn chip" data-online-role="join">join<small>enter code</small></button>
+        </div>
+        <input id="join-code-input" class="code-input hidden" maxlength="6"
+          placeholder="ROOM CODE" autocomplete="off" spellcheck="false" inputmode="text" />
+        <p class="online-note">Host is Black · Guest is White</p>
       </div>
 
       <button id="start" class="btn primary big">start game</button>
@@ -104,6 +116,7 @@
       <button id="confirm-btn" class="btn primary">place ●</button>
       <button id="pass-btn" class="btn">pass</button>
       <button id="undo-btn" class="btn">undo</button>
+      <button id="resign-btn" class="btn gone">resign</button>
       <button id="hint-btn" class="btn green">hint</button>
     </nav>
 
@@ -127,6 +140,35 @@
     </div>
   </div>
 
+  <!-- online lobby -->
+  <div id="lobby" class="overlay">
+    <div class="overlay-card">
+      <h2>play online</h2>
+      <div id="lobby-connecting" style="text-align:center;padding:12px 0">Setting up…</div>
+      <div id="lobby-host-view" style="display:none;text-align:center">
+        <p class="lobby-label">Share this code with your opponent:</p>
+        <div class="room-code" id="lobby-code">------</div>
+        <p class="lobby-waiting">Waiting for opponent…</p>
+      </div>
+      <div id="lobby-join-view" style="display:none;text-align:center;padding:12px 0">
+        Joining game…
+      </div>
+      <button id="lobby-cancel" class="btn" style="width:100%;margin-top:16px">cancel</button>
+    </div>
+  </div>
+
+  <!-- resign confirm -->
+  <div id="resign-overlay" class="overlay">
+    <div class="overlay-card">
+      <h2>resign?</h2>
+      <p style="font-size:.88rem;opacity:.75;margin:0 0 4px">Your opponent wins the game.</p>
+      <div class="row" style="margin-top:18px">
+        <button id="resign-confirm-btn" class="btn primary">resign</button>
+        <button id="resign-cancel-btn" class="btn">cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- quick guide / glossary -->
   <div id="guide" class="overlay">
     <div class="overlay-card guide-card">
@@ -139,7 +181,7 @@
             <circle cx="65" cy="65" r="13" fill="#211e18"/>
             <g fill="#1f4a3a"><circle cx="25" cy="65" r="5"/><circle cx="105" cy="65" r="5"/><circle cx="65" cy="25" r="5"/><circle cx="65" cy="105" r="5"/></g>
           </svg>
-          <div><b>Liberties</b><p>The empty points touching a stone or group — its breathing room (green here). Fill a group’s <i>last</i> liberty and it’s captured.</p></div>
+          <div><b>Liberties</b><p>The empty points touching a stone or group — its breathing room (green here). Fill a group's <i>last</i> liberty and it's captured.</p></div>
         </div>
         <div class="g-item">
           <svg viewBox="0 0 130 130" aria-hidden="true">
@@ -158,13 +200,13 @@
             <g><circle cx="65" cy="42" r="12" fill="#df5b25"/><circle cx="65" cy="42" r="6" fill="#f4eeda"/>
                <circle cx="65" cy="88" r="12" fill="#df5b25"/><circle cx="65" cy="88" r="6" fill="#f4eeda"/></g>
           </svg>
-          <div><b>Eyes &amp; living</b><p>An <i>eye</i> is an empty point your group fully surrounds. A group with <b>two real eyes can never be captured</b> — it’s alive. Making two eyes is how groups survive.</p></div>
+          <div><b>Eyes &amp; living</b><p>An <i>eye</i> is an empty point your group fully surrounds. A group with <b>two real eyes can never be captured</b> — it's alive. Making two eyes is how groups survive.</p></div>
         </div>
         <div class="g-item nodiagram">
-          <div><b>Territory</b><p>Empty points surrounded by only your stones are your territory. Most area (plus <i>komi</i>, White’s compensation) wins.</p></div>
+          <div><b>Territory</b><p>Empty points surrounded by only your stones are your territory. Most area (plus <i>komi</i>, White's compensation) wins.</p></div>
         </div>
         <div class="g-item nodiagram">
-          <div><b>Ko</b><p>You can’t play a move that repeats the whole board — so you can’t instantly recapture in a one-stone back-and-forth. Play elsewhere first.</p></div>
+          <div><b>Ko</b><p>You can't play a move that repeats the whole board — so you can't instantly recapture in a one-stone back-and-forth. Play elsewhere first.</p></div>
         </div>
       </div>
       <button id="guide-close" class="btn primary big">got it</button>

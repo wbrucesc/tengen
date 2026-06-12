@@ -1,9 +1,10 @@
 // Offline cache for Tengen. Network-first so code updates always show on
 // reload when online, with a cache fallback when offline / on the home screen.
-const CACHE = "tengen-v3";
+const CACHE = "tengen-v4";
 const ASSETS = [
   "./", "./index.html", "./styles.css",
   "./js/app.js", "./js/engine.js", "./js/ai.js",
+  "./js/transport.js", "./js/config.js",
   "./manifest.webmanifest", "./icons/icon.svg",
 ];
 
