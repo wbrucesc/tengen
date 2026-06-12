@@ -1,10 +1,12 @@
-// transport.js — Live multiplayer via Supabase Realtime.
-// Room discovery uses the `games` table (codes); Presence tracks who's in the
-// room (opponent-joined), and Broadcast carries live moves/passes/resign —
-// both work on any Supabase project without database replication setup.
+// transport.js — Live multiplayer over Supabase, using plain table polling.
+// Room discovery + move sync go through the `games` and `moves` tables; clients
+// poll for new rows. No Realtime/replication/broadcast needed — works on any
+// Supabase project with just the tables + RLS from SUPABASE_SETUP.md.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { BLACK, WHITE } from "./engine.js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
+
+const POLL_MS = 1200;
 
 export function isConfigured() {
   return !!(SUPABASE_URL && SUPABASE_ANON_KEY);
@@ -39,9 +41,11 @@ export class OnlineTransport {
     this._myColor = myColor;
     this._code = code;
     this._settings = settings || null; // {size, variant} — filled in for guest
-    this._channel = null;
     this._cbs = {};
+    this._timer = null;
+    this._lastId = 0;        // highest moves.id applied so far
     this._joinedSeen = false;
+    this._ended = false;
   }
 
   get myColor() { return this._myColor; }
@@ -83,73 +87,71 @@ export class OnlineTransport {
     );
   }
 
-  // Subscribe to live events. Presence tracks who's in the room (so the host
-  // learns when the guest arrives, regardless of connect order); Broadcast
-  // carries the live moves/passes/resign.
+  // Begin polling for opponent-join, incoming moves, and game end.
   subscribe({ onMove, onOpponentJoined, onGameEnd, onConnLost }) {
     this._cbs = { onMove, onOpponentJoined, onGameEnd, onConnLost };
-
-    this._channel = client().channel(`tengen:${this._gameId}`, {
-      config: { broadcast: { self: false }, presence: { key: sessionId() } },
-    });
-
-    // Host watches presence for the guest (color WHITE) showing up.
-    const checkPresence = () => {
-      if (this._myColor !== BLACK || this._joinedSeen) return;
-      const everyone = Object.values(this._channel.presenceState()).flat();
-      if (everyone.some((p) => p.color === WHITE)) {
-        this._joinedSeen = true;
-        this._cbs.onOpponentJoined?.({});
-      }
-    };
-
-    this._channel
-      .on("broadcast", { event: "move" }, ({ payload }) => {
-        if (payload.color !== this._myColor) this._cbs.onMove?.(payload);
-      })
-      .on("broadcast", { event: "end" }, ({ payload }) => {
-        this._cbs.onGameEnd?.(payload);
-      })
-      .on("presence", { event: "sync" }, checkPresence)
-      .on("presence", { event: "join" }, checkPresence)
-      .subscribe(async (status) => {
-        if (status === "SUBSCRIBED") {
-          // Announce our seat so the other side's presence sees us.
-          await this._channel.track({ color: this._myColor });
-        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          this._cbs.onConnLost?.();
-        }
-      });
+    this._poll();
+    this._timer = setInterval(() => this._poll(), POLL_MS);
   }
 
+  async _poll() {
+    const c = client();
+    try {
+      // Game row: drives host's opponent-joined and either side's game-end.
+      const { data: g } = await c.from("games")
+        .select("status, winner").eq("id", this._gameId).single();
+      if (g) {
+        if (this._myColor === BLACK && !this._joinedSeen &&
+            (g.status === "playing" || g.status === "done")) {
+          this._joinedSeen = true;
+          this._cbs.onOpponentJoined?.({});
+        }
+        if (!this._ended && g.status === "done") {
+          this._ended = true;
+          this._cbs.onGameEnd?.(g);
+        }
+      }
+
+      // New moves since the last we applied (ordered by the auto id).
+      const { data: moves } = await c.from("moves")
+        .select("id, color, x, y, is_pass")
+        .eq("game_id", this._gameId)
+        .gt("id", this._lastId)
+        .order("id", { ascending: true });
+      if (moves) for (const m of moves) {
+        if (m.id > this._lastId) this._lastId = m.id;
+        if (m.color !== this._myColor) this._cbs.onMove?.(m);
+      }
+    } catch { /* transient network error — next tick retries */ }
+  }
+
+  // `seq` only needs to satisfy the table's NOT NULL + unique(game_id, seq);
+  // application order is driven by the auto-increment id, so a random int is fine.
+  _randSeq() { return (Math.random() * 2000000000) | 0; }
+
   async sendMove(x, y) {
-    await this._channel.send({
-      type: "broadcast", event: "move",
-      payload: { color: this._myColor, x, y, is_pass: false },
+    const { error } = await client().from("moves").insert({
+      game_id: this._gameId, seq: this._randSeq(),
+      color: this._myColor, x, y, is_pass: false,
     });
+    if (error) throw new Error(error.message);
   }
 
   async sendPass() {
-    await this._channel.send({
-      type: "broadcast", event: "move",
-      payload: { color: this._myColor, x: null, y: null, is_pass: true },
+    const { error } = await client().from("moves").insert({
+      game_id: this._gameId, seq: this._randSeq(),
+      color: this._myColor, x: null, y: null, is_pass: true,
     });
+    if (error) throw new Error(error.message);
   }
 
-  // Resign / game end: tell the opponent, and best-effort record it in the DB.
   async endGame(winner) {
-    if (this._channel) {
-      this._channel.send({ type: "broadcast", event: "end", payload: { winner } });
-    }
     try {
       await client().from("games").update({ status: "done", winner }).eq("id", this._gameId);
     } catch {}
   }
 
   disconnect() {
-    if (this._channel) {
-      try { client().removeChannel(this._channel); } catch {}
-      this._channel = null;
-    }
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
   }
 }
