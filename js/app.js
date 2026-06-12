@@ -293,10 +293,12 @@ function place(x, y) {
   state.candidate = null; state.hint = null; clearInspect(); hideHintMsg();
   clack(res.captures.length ? "capture" : "place"); buzz(res.captures.length ? 22 : 10);
   for (const s of res.captures) state.anims.push({ x: s % go.size, y: (s / go.size) | 0, t: performance.now() });
-  if (state.variant === "capture" && res.captures.length) { captureWin(mover); return true; }
+  // Send the move first so the opponent receives it even when it ends the game
+  // (e.g. the winning capture in Capture Go).
   if (state.transport) {
     state.transport.sendMove(x, y).catch(() => flash("Move may not have sent — check your connection"));
   }
+  if (state.variant === "capture" && res.captures.length) { captureWin(mover); return true; }
   afterMove();
   return true;
 }
@@ -329,7 +331,7 @@ function aiMove() {
   if (go.ended) enterScoring();
 }
 
-// Apply a move received from the opponent over Realtime.
+// Apply a move received from the opponent (delivered by transport polling).
 function applyRemoteMove(row) {
   const go = state.go;
   if (!go || go.ended) return;
