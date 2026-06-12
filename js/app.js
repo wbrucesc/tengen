@@ -296,7 +296,7 @@ function place(x, y) {
   const mover = go.turn;
   const res = go.play(x, y);
   if (!res.ok) { flash(res.reason); buzz(30); return false; }
-  state.candidate = null; state.hint = null; clearInspect();
+  state.candidate = null; state.hint = null; clearInspect(); hideHintMsg();
   clack(res.captures.length ? "capture" : "place"); buzz(res.captures.length ? 22 : 10);
   for (const s of res.captures) state.anims.push({ x: s % go.size, y: (s / go.size) | 0, t: performance.now() });
   if (state.variant === "capture" && res.captures.length) { captureWin(mover); return true; }
@@ -377,6 +377,7 @@ function showInspect(x, y) {
   const d = state.go.inspect(x, y);
   if (!d) return;
   state.inspect = d; state.candidate = null;
+  state.hint = null; hideHintMsg();
   buzz(8); clack("place");
   const label = d.color === BLACK ? "Black group" : "White group";
   const badge = { alive: "✓ alive", atari: "⚠ atari", "one-eye": "one eye", unsettled: "unsettled" }[d.status];
@@ -393,6 +394,14 @@ function clearInspect() {
   state.inspect = null;
   $("#inspect").classList.remove("show");
 }
+
+function showHint(reason) {
+  clearInspect();
+  $("#hint-msg").innerHTML =
+    `<div class="ins-text">💡 ${reason}</div><div class="ins-dismiss">tap to dismiss</div>`;
+  $("#hint-msg").classList.add("show");
+}
+function hideHintMsg() { $("#hint-msg").classList.remove("show"); }
 function onMove(e) {
   if (!pressing || state.busy) return;
   const p = pointer(e);
@@ -452,7 +461,7 @@ function updateScorePanel() {
 function newGame(opts) {
   Object.assign(state, opts);
   state.go = new Go(opts.size);
-  state.candidate = null; state.hint = null; clearInspect();
+  state.candidate = null; state.hint = null; clearInspect(); hideHintMsg();
   state.scoring = false; state.dead = new Set(); state.reveal = 0; state.busy = false;
 
   // Capture Go vs full territory game: adjust the board chrome.
@@ -521,7 +530,7 @@ function wireUi() {
     if (state.busy || state.go.ended) return;
     const m = suggest(state.go, state.go.turn);
     state.hint = m.pass ? null : { x: m.x, y: m.y };
-    flash(m.reason, "hint");
+    showHint(m.reason);
     buzz(8);
   });
 
@@ -547,8 +556,15 @@ function wireUi() {
     $("#game").classList.remove("show"); $("#menu").classList.add("show");
   });
 
-  // Inspector panel: tap anywhere on it to dismiss.
+  // Inspector + hint panels: tap to dismiss (hint keeps the on-board marker).
   $("#inspect").addEventListener("click", clearInspect);
+  $("#hint-msg").addEventListener("click", hideHintMsg);
+
+  // Quick guide overlay.
+  const openGuide = () => $("#guide").classList.add("show");
+  $("#guide-btn").addEventListener("click", openGuide);
+  $("#help-btn").addEventListener("click", openGuide);
+  $("#guide-close").addEventListener("click", () => $("#guide").classList.remove("show"));
 
   // Canvas input
   canvas.addEventListener("pointerdown", onDown);

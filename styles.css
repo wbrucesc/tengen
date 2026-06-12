@@ -153,6 +153,18 @@ h1 { font-size: 2.6rem; margin: .2em 0 0; letter-spacing: .22em; }
 .ins-badge.atari { background: var(--orange); color: var(--cream); }
 .ins-text { font-size: .8rem; line-height: 1.4; margin-top: 6px; opacity: .9; }
 .ins-dismiss { font-size: .62rem; text-transform: uppercase; letter-spacing: .12em; opacity: .45; margin-top: 7px; text-align: center; }
+.inspect.hintcard { box-shadow: 0 6px 0 var(--green-d); }
+.inspect.hintcard .ins-text { margin-top: 0; }
+
+/* quick guide / glossary overlay */
+.guide-card { max-width: 390px; max-height: 84vh; overflow-y: auto; text-align: left; }
+.guide-card h2 { text-align: center; }
+.gloss { display: flex; flex-direction: column; gap: 15px; margin: 8px 0 18px; }
+.g-item { display: flex; gap: 12px; align-items: flex-start; }
+.g-item svg { width: 82px; height: 82px; flex: 0 0 auto; border: 2px solid var(--ink); border-radius: 10px; }
+.g-item b { font-size: .9rem; }
+.g-item p { margin: 3px 0 0; font-size: .8rem; line-height: 1.42; opacity: .85; }
+.g-item.nodiagram { padding-left: 2px; }
 
 .toggles { display: flex; gap: 8px; }
 .toggles .btn { flex: 1; }

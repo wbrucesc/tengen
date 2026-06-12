@@ -59,6 +59,7 @@
       </div>
 
       <button id="start" class="btn primary big">start game</button>
+      <button id="guide-btn" class="btn" style="width:100%;margin-top:10px">📖 quick guide — the basics</button>
     </section>
 
     <footer class="hint-foot">
@@ -80,6 +81,7 @@
         <span class="cap"><span class="pip black"></span><b id="cap-b">0</b></span>
         <span class="cap"><span class="pip white"></span><b id="cap-w">0</b></span>
       </div>
+      <button id="help-btn" class="btn mini" aria-label="Quick guide">?</button>
     </header>
 
     <div id="objective" class="objective"></div>
@@ -89,6 +91,7 @@
       <div id="flash" class="flash"></div>
       <div id="estimate" class="estimate"></div>
       <div id="inspect" class="inspect"></div>
+      <div id="hint-msg" class="inspect hintcard"></div>
     </div>
 
     <div class="toggles">
@@ -121,6 +124,50 @@
         <button id="rematch-btn" class="btn primary">rematch</button>
         <button id="score-menu-btn" class="btn">menu</button>
       </div>
+    </div>
+  </div>
+
+  <!-- quick guide / glossary -->
+  <div id="guide" class="overlay">
+    <div class="overlay-card guide-card">
+      <h2>quick guide</h2>
+      <div class="gloss">
+        <div class="g-item">
+          <svg viewBox="0 0 130 130" aria-hidden="true">
+            <rect width="130" height="130" rx="10" fill="#e4d2a8"/>
+            <g stroke="#3a3226" stroke-width="2.5"><path d="M25 65H105M65 25V105"/></g>
+            <circle cx="65" cy="65" r="13" fill="#211e18"/>
+            <g fill="#1f4a3a"><circle cx="25" cy="65" r="5"/><circle cx="105" cy="65" r="5"/><circle cx="65" cy="25" r="5"/><circle cx="65" cy="105" r="5"/></g>
+          </svg>
+          <div><b>Liberties</b><p>The empty points touching a stone or group — its breathing room (green here). Fill a group’s <i>last</i> liberty and it’s captured.</p></div>
+        </div>
+        <div class="g-item">
+          <svg viewBox="0 0 130 130" aria-hidden="true">
+            <rect width="130" height="130" rx="10" fill="#e4d2a8"/>
+            <g stroke="#3a3226" stroke-width="2.5"><path d="M25 65H105M65 25V105"/></g>
+            <circle cx="65" cy="65" r="13" fill="#211e18"/>
+            <g fill="#f4eeda" stroke="#857a55" stroke-width="1.5"><circle cx="25" cy="65" r="13"/><circle cx="105" cy="65" r="13"/><circle cx="65" cy="25" r="13"/></g>
+            <circle cx="65" cy="105" r="10" fill="none" stroke="#df5b25" stroke-width="4"/>
+          </svg>
+          <div><b>Atari &amp; capture</b><p>A group down to <b>one</b> liberty is in <i>atari</i> — Tengen pulses it orange. One more enemy stone on that last point (the orange ring) captures it.</p></div>
+        </div>
+        <div class="g-item">
+          <svg viewBox="0 0 130 130" aria-hidden="true">
+            <rect width="130" height="130" rx="10" fill="#e4d2a8"/>
+            <rect x="28" y="12" width="74" height="106" rx="22" fill="#211e18"/>
+            <g><circle cx="65" cy="42" r="12" fill="#df5b25"/><circle cx="65" cy="42" r="6" fill="#f4eeda"/>
+               <circle cx="65" cy="88" r="12" fill="#df5b25"/><circle cx="65" cy="88" r="6" fill="#f4eeda"/></g>
+          </svg>
+          <div><b>Eyes &amp; living</b><p>An <i>eye</i> is an empty point your group fully surrounds. A group with <b>two real eyes can never be captured</b> — it’s alive. Making two eyes is how groups survive.</p></div>
+        </div>
+        <div class="g-item nodiagram">
+          <div><b>Territory</b><p>Empty points surrounded by only your stones are your territory. Most area (plus <i>komi</i>, White’s compensation) wins.</p></div>
+        </div>
+        <div class="g-item nodiagram">
+          <div><b>Ko</b><p>You can’t play a move that repeats the whole board — so you can’t instantly recapture in a one-stone back-and-forth. Play elsewhere first.</p></div>
+        </div>
+      </div>
+      <button id="guide-close" class="btn primary big">got it</button>
     </div>
   </div>
 
