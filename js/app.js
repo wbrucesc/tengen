@@ -1,6 +1,7 @@
 // app.js — UI, rendering, interaction, sound. Wires the engine to the screen.
 import { Go, EMPTY, BLACK, WHITE, other, KOMI } from "./engine.js";
-import { chooseMove } from "./ai.js";
+import { chooseMove, suggest } from "./ai.js";
+import { OnlineTransport, isConfigured, sessionId } from "./transport.js";
 
 const $ = (sel) => document.querySelector(sel);
 const canvas = $("#board");
@@ -21,19 +22,22 @@ const C = {
 // ---- Game state ------------------------------------------------------------
 const state = {
   go: null,
-  mode: "computer",      // "computer" | "friend"
-  human: BLACK,          // which color the human plays in computer mode
+  variant: "capture",    // "capture" | "territory"
+  mode: "computer",      // "computer" | "friend" | "online"
+  human: BLACK,          // which color the local player controls
   level: "easy",
   showTerritory: false,
   showAtari: true,
   confirmMoves: true,
   candidate: null,       // {x,y} pending confirmation
   hint: null,            // {x,y} suggested
-  scoring: false,        // in end-of-game dead-stone marking
+  inspect: null,         // group inspector result
+  scoring: false,
   dead: new Set(),
-  reveal: 0,             // 0..1 territory-fill animation progress
-  anims: [],             // capture pops etc.
-  busy: false,           // AI thinking / animating lock
+  reveal: 0,
+  anims: [],
+  busy: false,
+  transport: null,       // OnlineTransport | null
 };
 
 // ---- Audio + haptics -------------------------------------------------------
@@ -53,7 +57,6 @@ function clack(kind = "place") {
     g.gain.setValueAtTime(0.25, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
     o.connect(g).connect(a.destination); o.start(t); o.stop(t + 0.24);
   } else {
-    // short noisy "tock"
     const buf = a.createBuffer(1, 1024, a.sampleRate);
     const d = buf.getChannelData(0);
     for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 8);
@@ -105,11 +108,9 @@ function draw(now = 0) {
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, geom.css, geom.css);
 
-  // Board field
   ctx.fillStyle = C.board;
   roundRect(ctx, 0, 0, geom.css, geom.css, cell * 0.35); ctx.fill();
 
-  // Live territory / influence heatmap (beginner aid)
   if (state.showTerritory && !state.scoring) {
     const inf = go.influence();
     for (let i = 0; i < inf.length; i++) {
@@ -121,7 +122,6 @@ function draw(now = 0) {
     }
   }
 
-  // Grid
   ctx.strokeStyle = C.line; ctx.lineWidth = Math.max(1, cell * 0.035); ctx.lineCap = "round";
   ctx.beginPath();
   for (let i = 0; i < size; i++) {
@@ -129,13 +129,11 @@ function draw(now = 0) {
     ctx.moveTo(toPx(i), toPx(0)); ctx.lineTo(toPx(i), toPx(size - 1));
   }
   ctx.stroke();
-  // Star points
   ctx.fillStyle = C.line;
   for (const [sx, sy] of starPoints(size)) {
     ctx.beginPath(); ctx.arc(toPx(sx), toPx(sy), cell * 0.08, 0, 7); ctx.fill();
   }
 
-  // End-of-game ownership fill
   if (state.scoring && state.reveal > 0) {
     const owner = go.ownership(state.dead);
     for (let i = 0; i < owner.length; i++) {
@@ -148,7 +146,6 @@ function draw(now = 0) {
     }
   }
 
-  // Stones
   const r = cell * 0.46;
   for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
     const v = go.get(x, y); if (v === EMPTY) continue;
@@ -156,7 +153,6 @@ function draw(now = 0) {
     drawStone(toPx(x), toPx(y), r, v, dead);
   }
 
-  // Atari warnings
   if (state.showAtari && !state.scoring) {
     const pulse = 0.5 + 0.5 * Math.sin(now / 220);
     for (const g of go.atariGroups()) {
@@ -169,20 +165,38 @@ function draw(now = 0) {
     }
   }
 
-  // Last move marker
   const lm = go.lastMove;
   if (lm && !lm.pass && !state.scoring) {
     ctx.fillStyle = go.get(lm.x, lm.y) === BLACK ? C.cream : C.ink;
     ctx.beginPath(); ctx.arc(toPx(lm.x), toPx(lm.y), cell * 0.12, 0, 7); ctx.fill();
   }
 
-  // Hint marker
+  if (state.inspect && !state.scoring) {
+    const ins = state.inspect;
+    ctx.strokeStyle = C.green; ctx.lineWidth = cell * 0.05;
+    for (const s of ins.stones) {
+      const x = s % size, y = (s / size) | 0;
+      ctx.beginPath(); ctx.arc(toPx(x), toPx(y), r + cell * 0.07, 0, 7); ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(31,74,58,.55)";
+    for (const li of ins.libPoints) {
+      const x = li % size, y = (li / size) | 0;
+      ctx.beginPath(); ctx.arc(toPx(x), toPx(y), cell * 0.12, 0, 7); ctx.fill();
+    }
+    for (const ep of ins.eyePoints) {
+      const x = ep % size, y = (ep / size) | 0;
+      ctx.fillStyle = C.orange;
+      ctx.beginPath(); ctx.arc(toPx(x), toPx(y), cell * 0.17, 0, 7); ctx.fill();
+      ctx.fillStyle = C.cream;
+      ctx.beginPath(); ctx.arc(toPx(x), toPx(y), cell * 0.07, 0, 7); ctx.fill();
+    }
+  }
+
   if (state.hint) {
     ctx.strokeStyle = C.green; ctx.lineWidth = cell * 0.08;
     ctx.beginPath(); ctx.arc(toPx(state.hint.x), toPx(state.hint.y), r, 0, 7); ctx.stroke();
   }
 
-  // Candidate ghost stone
   if (state.candidate && !state.scoring) {
     const { x, y } = state.candidate;
     ctx.globalAlpha = 0.55;
@@ -192,7 +206,6 @@ function draw(now = 0) {
     ctx.beginPath(); ctx.arc(toPx(x), toPx(y), r + cell * 0.1, 0, 7); ctx.stroke();
   }
 
-  // Capture pops
   for (const an of state.anims) {
     const p = (now - an.t) / 260; if (p >= 1) continue;
     ctx.globalAlpha = 1 - p;
@@ -208,10 +221,8 @@ function draw(now = 0) {
 function drawStone(cx, cy, r, color, dead) {
   ctx.save();
   if (dead) ctx.globalAlpha = 0.32;
-  // drop shadow for the "analog dimension"
   ctx.fillStyle = C.shadow;
   ctx.beginPath(); ctx.arc(cx + r * 0.12, cy + r * 0.16, r, 0, 7); ctx.fill();
-  // body
   const g = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.4, r * 0.1, cx, cy, r);
   if (color === BLACK) { g.addColorStop(0, "#4a4438"); g.addColorStop(1, C.ink); }
   else { g.addColorStop(0, "#ffffff"); g.addColorStop(1, "#ddd3ba"); }
@@ -245,14 +256,18 @@ function updateHud() {
     turnEl.textContent = state.scoring ? "Mark dead stones" : "Game over";
   } else {
     const who = go.turn === BLACK ? "Black" : "White";
-    const you = state.mode === "computer" ? (go.turn === state.human ? " · you" : " · computer") : "";
+    let you = "";
+    if (state.mode === "computer") {
+      you = go.turn === state.human ? " · you" : " · computer";
+    } else if (state.mode === "online") {
+      you = go.turn === state.human ? " · your turn" : " · opponent";
+    }
     turnEl.textContent = `${who} to play${you}`;
   }
   $("#turn-dot").className = "dot " + (go.turn === BLACK ? "black" : "white");
   $("#cap-b").textContent = go.captures[BLACK];
   $("#cap-w").textContent = go.captures[WHITE];
 
-  // live estimate from influence
   if (state.showTerritory && !state.scoring) {
     const inf = go.influence();
     let b = 0, w = 0;
@@ -269,11 +284,19 @@ function updateHud() {
 // ---- Move handling ---------------------------------------------------------
 function place(x, y) {
   const go = state.go;
+  if (state.transport && go.turn !== state.human) {
+    flash("Wait for your opponent's move"); buzz(30); return false;
+  }
+  const mover = go.turn;
   const res = go.play(x, y);
   if (!res.ok) { flash(res.reason); buzz(30); return false; }
-  state.candidate = null; state.hint = null;
+  state.candidate = null; state.hint = null; clearInspect(); hideHintMsg();
   clack(res.captures.length ? "capture" : "place"); buzz(res.captures.length ? 22 : 10);
   for (const s of res.captures) state.anims.push({ x: s % go.size, y: (s / go.size) | 0, t: performance.now() });
+  if (state.variant === "capture" && res.captures.length) { captureWin(mover); return true; }
+  if (state.transport) {
+    state.transport.sendMove(x, y).catch(() => flash("Move may not have sent — check your connection"));
+  }
   afterMove();
   return true;
 }
@@ -290,13 +313,15 @@ function afterMove() {
 function aiMove() {
   const go = state.go;
   if (go.ended) { state.busy = false; return; }
+  const mover = go.turn;
   const m = chooseMove(go, go.turn, state.level);
-  if (m.pass) { go.pass(); clack("place"); if (go.ended) enterScoring(); }
+  if (m.pass) { go.pass(); clack("place"); }
   else {
     const res = go.play(m.x, m.y);
     if (res.ok) {
       clack(res.captures.length ? "capture" : "place");
       for (const s of res.captures) state.anims.push({ x: s % go.size, y: (s / go.size) | 0, t: performance.now() });
+      if (state.variant === "capture" && res.captures.length) { captureWin(mover); return; }
     }
   }
   state.busy = false;
@@ -304,22 +329,118 @@ function aiMove() {
   if (go.ended) enterScoring();
 }
 
-function flash(msg) {
-  const el = $("#flash"); el.textContent = msg; el.classList.add("show");
-  clearTimeout(flash._t); flash._t = setTimeout(() => el.classList.remove("show"), 1200);
+// Apply a move received from the opponent over Realtime.
+function applyRemoteMove(row) {
+  const go = state.go;
+  if (!go || go.ended) return;
+  const mover = row.color;
+  if (row.is_pass) {
+    go.pass();
+    clack("place"); buzz(10);
+    if (go.ended) { enterScoring(); } else { updateHud(); }
+    return;
+  }
+  const res = go.play(row.x, row.y);
+  if (!res.ok) {
+    flash("Sync error — please refresh"); return;
+  }
+  clack(res.captures.length ? "capture" : "place"); buzz(res.captures.length ? 22 : 10);
+  for (const s of res.captures) state.anims.push({ x: s % go.size, y: (s / go.size) | 0, t: performance.now() });
+  if (state.variant === "capture" && res.captures.length) { captureWin(mover); return; }
+  updateHud();
+  if (go.ended) enterScoring();
+}
+
+// Opponent resigned or some other DB-driven game end.
+function handleOnlineGameEnd(game) {
+  if (!state.go || state.go._resignHandled) return;
+  state.go.ended = true;
+  state.go._resignHandled = true;
+  const winner = game.winner;
+  const won = state.transport && winner === state.transport.myColor;
+  const winColor = winner === BLACK ? "Black" : "White";
+  const r2 = $("#score-result2");
+  if (r2) r2.innerHTML =
+    `<span class="win">${winColor} wins by resignation</span><br>` +
+    `<small>${won ? "Your opponent resigned." : "You resigned."}</small>`;
+  $("#score-final").classList.add("show");
+  if (state.transport) { state.transport.disconnect(); state.transport = null; }
+  updateHud();
+}
+
+function captureWin(winner) {
+  state.go.ended = true; state.busy = false;
+  state.candidate = null; state.hint = null;
+  const who = winner === BLACK ? "Black" : "White";
+  const youWon = state.mode !== "friend" && winner === state.human;
+  buzz(40); clack("capture");
+  const r2 = $("#score-result2");
+  if (r2) r2.innerHTML = `<span class="win">${who} wins!</span><br>first capture 🎯` +
+    (state.mode !== "friend"
+      ? `<br><small>${youWon ? "nice — you snagged the first stone!" : (state.mode === "online" ? "your opponent captured first!" : "the computer captured first — go again!")}</small>`
+      : "");
+  $("#score-final").classList.add("show");
+  updateHud();
+}
+
+function flash(msg, kind = "error") {
+  const el = $("#flash"); el.textContent = msg;
+  el.className = "flash show" + (kind === "hint" ? " hint" : "");
+  clearTimeout(flash._t);
+  flash._t = setTimeout(() => el.classList.remove("show"), kind === "hint" ? 4800 : 1200);
 }
 
 // ---- Interaction -----------------------------------------------------------
 let pressing = false;
 function onDown(e) {
-  if (state.busy || state.go.ended) { if (state.scoring) onScoreTap(e); return; }
+  if (state.scoring) { onScoreTap(e); return; }
+  if (state.busy || state.go.ended) return;
   audio();
-  pressing = true;
+  // Online: silently block interaction when it's not your turn
+  if (state.transport && state.go.turn !== state.human) {
+    flash("Waiting for opponent…"); e.preventDefault(); return;
+  }
   const p = pointer(e);
   const hit = nearest(p.x, p.y);
+  if (hit && state.go.get(hit.x, hit.y) !== EMPTY) {
+    showInspect(hit.x, hit.y); pressing = false; e.preventDefault(); return;
+  }
+  clearInspect();
+  pressing = true;
   if (hit) { state.candidate = hit; updateHud(); }
   e.preventDefault();
 }
+
+function showInspect(x, y) {
+  const d = state.go.inspect(x, y);
+  if (!d) return;
+  state.inspect = d; state.candidate = null;
+  state.hint = null; hideHintMsg();
+  buzz(8); clack("place");
+  const label = d.color === BLACK ? "Black group" : "White group";
+  const badge = { alive: "✓ alive", atari: "⚠ atari", "one-eye": "one eye", unsettled: "unsettled" }[d.status];
+  $("#inspect").innerHTML =
+    `<div class="ins-head"><b>${label}</b> · ${d.libs} liberties · ${d.eyes} eye${d.eyes === 1 ? "" : "s"}` +
+    `<span class="ins-badge ${d.status}">${badge}</span></div>` +
+    `<div class="ins-text">${d.text}</div><div class="ins-dismiss">tap to dismiss</div>`;
+  $("#inspect").classList.add("show");
+  updateHud();
+}
+
+function clearInspect() {
+  if (!state.inspect) return;
+  state.inspect = null;
+  $("#inspect").classList.remove("show");
+}
+
+function showHint(reason) {
+  clearInspect();
+  $("#hint-msg").innerHTML =
+    `<div class="ins-text">💡 ${reason}</div><div class="ins-dismiss">tap to dismiss</div>`;
+  $("#hint-msg").classList.add("show");
+}
+function hideHintMsg() { $("#hint-msg").classList.remove("show"); }
+
 function onMove(e) {
   if (!pressing || state.busy) return;
   const p = pointer(e);
@@ -330,7 +451,6 @@ function onUp(e) {
   if (!pressing) return; pressing = false;
   if (state.busy || !state.candidate) return;
   if (!state.confirmMoves) { commit(); }
-  // in confirm mode the stone stays pending; user taps Confirm button
 }
 function commit() {
   if (!state.candidate) return;
@@ -356,7 +476,6 @@ function onScoreTap(e) {
   if (!hit) return;
   const go = state.go;
   if (go.get(hit.x, hit.y) === EMPTY) return;
-  // toggle whole group dead/alive
   const grp = go.group(hit.x, hit.y);
   const anyDead = grp.stones.some((s) => state.dead.has(s));
   for (const s of grp.stones) { if (anyDead) state.dead.delete(s); else state.dead.add(s); }
@@ -375,12 +494,98 @@ function updateScorePanel() {
   const r2 = $("#score-result2"); if (r2) r2.innerHTML = html;
 }
 
+// ---- Lobby (online mode setup) ---------------------------------------------
+let _lobbyTransport = null;
+
+function openLobby(sel) {
+  _lobbyTransport = null;
+  $("#lobby").classList.add("show");
+  $("#lobby-host-view").style.display = "none";
+  $("#lobby-join-view").style.display = "none";
+  $("#lobby-connecting").style.display = "block";
+
+  if (sel.onlineRole === "host") {
+    OnlineTransport.host(sel.size, sel.variant)
+      .then((t) => {
+        _lobbyTransport = t;
+        t.subscribe({
+          onMove: applyRemoteMove,
+          onOpponentJoined: () => {
+            closeLobby();
+            launchOnlineGame(t, sel);
+          },
+          onGameEnd: handleOnlineGameEnd,
+          onConnLost: () => flash("Connection lost — please refresh"),
+        });
+        $("#lobby-code").textContent = t.code;
+        $("#lobby-connecting").style.display = "none";
+        $("#lobby-host-view").style.display = "block";
+      })
+      .catch((e) => { closeLobby(); flash(e.message || "Could not create room"); });
+  } else {
+    const code = sel.onlineCode;
+    $("#lobby-connecting").style.display = "none";
+    $("#lobby-join-view").style.display = "block";
+    OnlineTransport.join(code)
+      .then((t) => {
+        _lobbyTransport = t;
+        t.subscribe({
+          onMove: applyRemoteMove,
+          onOpponentJoined: () => {},
+          onGameEnd: handleOnlineGameEnd,
+          onConnLost: () => flash("Connection lost — please refresh"),
+        });
+        closeLobby();
+        launchOnlineGame(t, { ...sel, ...t.settings });
+      })
+      .catch((e) => { closeLobby(); flash(e.message || "Could not join game"); });
+  }
+}
+
+function closeLobby() {
+  $("#lobby").classList.remove("show");
+}
+
+function launchOnlineGame(transport, settings) {
+  if (state.transport && state.transport !== transport) state.transport.disconnect();
+  state.transport = transport;
+  newGame({
+    variant: settings.variant,
+    size: settings.size,
+    mode: "online",
+    human: transport.myColor,
+  });
+}
+
 // ---- Menu / lifecycle ------------------------------------------------------
 function newGame(opts) {
+  if (state.transport && state.transport !== opts.transport) {
+    state.transport.disconnect(); state.transport = null;
+  }
   Object.assign(state, opts);
+
   state.go = new Go(opts.size);
-  state.candidate = null; state.hint = null;
+  state.candidate = null; state.hint = null; clearInspect(); hideHintMsg();
   state.scoring = false; state.dead = new Set(); state.reveal = 0; state.busy = false;
+
+  const cap = state.variant === "capture";
+  if (cap) state.showTerritory = false;
+  const tg = $("#t-territory");
+  tg.classList.toggle("gone", cap);
+  tg.classList.toggle("on", state.showTerritory);
+  $("#pass-btn").classList.toggle("gone", cap);
+  const obj = $("#objective");
+  obj.classList.toggle("show", cap);
+  obj.textContent = "🎯 First to capture a stone wins";
+
+  const isOnline = state.mode === "online";
+  $("#undo-btn").classList.toggle("gone", isOnline);
+  $("#resign-btn").classList.toggle("gone", !isOnline);
+
+  const rematchBtn = $("#rematch-btn");
+  if (rematchBtn) rematchBtn.textContent = isOnline ? "new game" : "rematch";
+
+  $("#score-final").classList.remove("show");
   $("#score-panel").classList.remove("show");
   $("#play-actions").classList.remove("hidden");
   $("#menu").classList.remove("show");
@@ -388,77 +593,149 @@ function newGame(opts) {
   layout();
   updateHud();
   if (!raf) raf = requestAnimationFrame(loop);
-  // If human is white vs computer, let the computer (black) open.
+
   if (state.mode === "computer" && state.go.turn !== state.human) {
     state.busy = true; setTimeout(aiMove, 500);
   }
 }
 
+// ---- UI wiring -------------------------------------------------------------
 function wireUi() {
-  // tactile press feedback for all buttons
   document.addEventListener("pointerdown", (e) => {
     const b = e.target.closest(".btn"); if (b) buzz(6);
   });
 
-  // Menu: board size + opponent selection
-  let sel = { size: 9, mode: "computer", level: "easy", human: BLACK };
+  let sel = { variant: "capture", size: 9, mode: "computer", level: "easy", human: BLACK, onlineRole: "host", onlineCode: "" };
+
+  document.querySelectorAll("[data-variant]").forEach((b) =>
+    b.addEventListener("click", () => { sel.variant = b.dataset.variant; markGroup("[data-variant]", b); }));
   document.querySelectorAll("[data-size]").forEach((b) =>
     b.addEventListener("click", () => { sel.size = +b.dataset.size; markGroup("[data-size]", b); }));
   document.querySelectorAll("[data-mode]").forEach((b) =>
     b.addEventListener("click", () => {
       sel.mode = b.dataset.mode; markGroup("[data-mode]", b);
-      $("#level-row").classList.toggle("hidden", sel.mode !== "computer");
+      const isComp = sel.mode === "computer", isOnline = sel.mode === "online";
+      $("#level-row").classList.toggle("hidden", !isComp);
+      $("#online-row").classList.toggle("hidden", !isOnline);
     }));
   document.querySelectorAll("[data-level]").forEach((b) =>
     b.addEventListener("click", () => { sel.level = b.dataset.level; markGroup("[data-level]", b); }));
   document.querySelectorAll("[data-color]").forEach((b) =>
     b.addEventListener("click", () => { sel.human = +b.dataset.color; markGroup("[data-color]", b); }));
 
-  $("#start").addEventListener("click", () => { audio(); newGame({ ...sel }); });
+  document.querySelectorAll("[data-online-role]").forEach((b) =>
+    b.addEventListener("click", () => {
+      sel.onlineRole = b.dataset.onlineRole; markGroup("[data-online-role]", b);
+      $("#join-code-input").classList.toggle("hidden", sel.onlineRole !== "join");
+    }));
 
-  // Play actions
+  $("#join-code-input").addEventListener("input", (e) => {
+    e.target.value = e.target.value.toUpperCase().replace(/[^A-Z2-9]/g, "");
+    sel.onlineCode = e.target.value;
+  });
+
+  $("#start").addEventListener("click", () => {
+    audio();
+    if (sel.mode === "online") {
+      if (!isConfigured()) {
+        flash("Online play needs Supabase — see SUPABASE_SETUP.md");
+        return;
+      }
+      if (sel.onlineRole === "join") {
+        const code = sel.onlineCode.trim();
+        if (code.length !== 6) { flash("Enter the 6-character room code"); return; }
+      }
+      openLobby(sel);
+    } else {
+      newGame({ ...sel });
+    }
+  });
+
   $("#confirm-btn").addEventListener("click", () => { if (!state.busy) commit(); });
   $("#pass-btn").addEventListener("click", () => {
     if (state.busy || state.go.ended) return;
+    if (state.transport && state.go.turn !== state.human) {
+      flash("Waiting for opponent…"); return;
+    }
     state.go.pass(); state.candidate = null; clack("place"); buzz(10);
+    if (state.transport) {
+      state.transport.sendPass().catch(() => flash("Pass may not have sent — check connection"));
+    }
     afterMove();
   });
   $("#undo-btn").addEventListener("click", () => {
     if (state.busy) return;
     state.go.undo();
-    if (state.mode === "computer" && state.go.turn !== state.human) state.go.undo(); // undo the pair
+    if (state.mode === "computer" && state.go.turn !== state.human) state.go.undo();
     state.candidate = null; state.hint = null; buzz(10); updateHud();
   });
   $("#hint-btn").addEventListener("click", () => {
     if (state.busy || state.go.ended) return;
-    const m = chooseMove(state.go, state.go.turn, "steady");
+    if (state.transport && state.go.turn !== state.human) {
+      flash("Hints are for your turn"); return;
+    }
+    const m = suggest(state.go, state.go.turn);
     state.hint = m.pass ? null : { x: m.x, y: m.y };
-    if (!m.pass) buzz(8);
+    showHint(m.reason);
+    buzz(8);
   });
 
-  // Toggles
+  $("#resign-btn").addEventListener("click", () => {
+    if (!state.transport || state.go.ended) return;
+    $("#resign-overlay").classList.add("show");
+  });
+  $("#resign-confirm-btn").addEventListener("click", async () => {
+    $("#resign-overlay").classList.remove("show");
+    if (!state.transport) return;
+    const winner = other(state.transport.myColor);
+    state.transport.endGame(winner).catch(() => {});
+    handleOnlineGameEnd({ winner });
+  });
+  $("#resign-cancel-btn").addEventListener("click", () => {
+    $("#resign-overlay").classList.remove("show");
+  });
+
   bindToggle("#t-territory", "showTerritory");
   bindToggle("#t-atari", "showAtari");
   bindToggle("#t-confirm", "confirmMoves");
 
-  // Score panel
   $("#finish-btn").addEventListener("click", () => {
     state.reveal = 0; updateScorePanel();
     $("#score-final").classList.add("show");
   });
   $("#rematch-btn").addEventListener("click", () => {
+    if (state.mode === "online") {
+      if (state.transport) { state.transport.disconnect(); state.transport = null; }
+      $("#score-final").classList.remove("show");
+      $("#game").classList.remove("show"); $("#menu").classList.add("show");
+      return;
+    }
     $("#score-final").classList.remove("show");
-    newGame({ size: state.go.size, mode: state.mode, level: state.level, human: state.human });
+    newGame({ variant: state.variant, size: state.go.size, mode: state.mode, level: state.level, human: state.human });
   });
   $("#menu-btn").addEventListener("click", () => {
+    if (state.transport) { state.transport.disconnect(); state.transport = null; }
     $("#game").classList.remove("show"); $("#menu").classList.add("show");
   });
   $("#score-menu-btn").addEventListener("click", () => {
+    if (state.transport) { state.transport.disconnect(); state.transport = null; }
     $("#score-final").classList.remove("show"); $("#score-panel").classList.remove("show");
     $("#game").classList.remove("show"); $("#menu").classList.add("show");
   });
 
-  // Canvas input
+  $("#lobby-cancel").addEventListener("click", () => {
+    closeLobby();
+    if (_lobbyTransport) { _lobbyTransport.disconnect(); _lobbyTransport = null; }
+  });
+
+  $("#inspect").addEventListener("click", clearInspect);
+  $("#hint-msg").addEventListener("click", hideHintMsg);
+
+  const openGuide = () => $("#guide").classList.add("show");
+  $("#guide-btn").addEventListener("click", openGuide);
+  $("#help-btn").addEventListener("click", openGuide);
+  $("#guide-close").addEventListener("click", () => $("#guide").classList.remove("show"));
+
   canvas.addEventListener("pointerdown", onDown);
   canvas.addEventListener("pointermove", onMove);
   window.addEventListener("pointerup", onUp);
