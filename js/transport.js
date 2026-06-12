@@ -1,6 +1,7 @@
-// transport.js — Live multiplayer via Supabase Realtime.
-// Host creates a room (gets a code), guest joins by entering the code.
-// Moves are inserted into the "moves" table; Realtime pushes them to the opponent.
+// transport.js — Live multiplayer via Supabase Realtime Broadcast.
+// Room discovery uses the `games` table (codes); live signaling (moves, pass,
+// resign, opponent-joined) goes over a Broadcast channel, which works on any
+// Supabase project without database replication / publication setup.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { BLACK, WHITE } from "./engine.js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
@@ -38,12 +39,9 @@ export class OnlineTransport {
     this._myColor = myColor;
     this._code = code;
     this._settings = settings || null; // {size, variant} — filled in for guest
-    this._outSeq = 0;
     this._channel = null;
-    this._moveCb = null;
-    this._joinedCb = null;
-    this._endCb = null;
-    this._connCb = null;
+    this._cbs = {};
+    this._joinedSeen = false;
   }
 
   get myColor() { return this._myColor; }
@@ -85,57 +83,64 @@ export class OnlineTransport {
     );
   }
 
-  // Subscribe to live events. Call once; callbacks fire as moves/status come in.
+  // Subscribe to live events over a Broadcast channel.
   subscribe({ onMove, onOpponentJoined, onGameEnd, onConnLost }) {
-    this._moveCb = onMove;
-    this._joinedCb = onOpponentJoined;
-    this._endCb = onGameEnd;
-    this._connCb = onConnLost;
+    this._cbs = { onMove, onOpponentJoined, onGameEnd, onConnLost };
 
-    this._channel = client()
-      .channel(`tengen:${this._gameId}`)
-      .on("postgres_changes", {
-        event: "INSERT", schema: "public", table: "moves",
-        filter: `game_id=eq.${this._gameId}`,
-      }, (p) => {
-        if (p.new.color !== this._myColor) this._moveCb?.(p.new);
+    this._channel = client().channel(`tengen:${this._gameId}`, {
+      config: { broadcast: { self: false } },
+    });
+
+    this._channel
+      .on("broadcast", { event: "move" }, ({ payload }) => {
+        if (payload.color !== this._myColor) this._cbs.onMove?.(payload);
       })
-      .on("postgres_changes", {
-        event: "UPDATE", schema: "public", table: "games",
-        filter: `id=eq.${this._gameId}`,
-      }, (p) => {
-        const g = p.new;
-        // Host gets notified when guest joins (status flips to "playing")
-        if (g.status === "playing" && this._myColor === BLACK) this._joinedCb?.(g);
-        if (g.status === "done") this._endCb?.(g);
+      .on("broadcast", { event: "joined" }, () => {
+        // Host learns the guest has arrived. Ack so a late-subscribing guest
+        // (who missed nothing here) and the host both settle into the game.
+        if (this._myColor === BLACK && !this._joinedSeen) {
+          this._joinedSeen = true;
+          this._channel.send({ type: "broadcast", event: "ack", payload: {} });
+          this._cbs.onOpponentJoined?.({});
+        }
+      })
+      .on("broadcast", { event: "end" }, ({ payload }) => {
+        this._cbs.onGameEnd?.(payload);
       })
       .subscribe((status) => {
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") this._connCb?.();
+        if (status === "SUBSCRIBED") {
+          // Guest announces itself once connected so the host can start.
+          if (this._myColor === WHITE) {
+            this._channel.send({ type: "broadcast", event: "joined", payload: {} });
+          }
+        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          this._cbs.onConnLost?.();
+        }
       });
   }
 
   async sendMove(x, y) {
-    const { error } = await client().from("moves").insert({
-      game_id: this._gameId, seq: this._outSeq++,
-      color: this._myColor, x, y, is_pass: false,
+    await this._channel.send({
+      type: "broadcast", event: "move",
+      payload: { color: this._myColor, x, y, is_pass: false },
     });
-    if (error) throw new Error(error.message);
   }
 
   async sendPass() {
-    const { error } = await client().from("moves").insert({
-      game_id: this._gameId, seq: this._outSeq++,
-      color: this._myColor, x: null, y: null, is_pass: true,
+    await this._channel.send({
+      type: "broadcast", event: "move",
+      payload: { color: this._myColor, x: null, y: null, is_pass: true },
     });
-    if (error) throw new Error(error.message);
   }
 
-  // Mark the game done in the DB (used for resign; two-pass endings are self-evident).
+  // Resign / game end: tell the opponent, and best-effort record it in the DB.
   async endGame(winner) {
-    const { error } = await client().from("games")
-      .update({ status: "done", winner })
-      .eq("id", this._gameId);
-    if (error) throw new Error(error.message);
+    if (this._channel) {
+      this._channel.send({ type: "broadcast", event: "end", payload: { winner } });
+    }
+    try {
+      await client().from("games").update({ status: "done", winner }).eq("id", this._gameId);
+    } catch {}
   }
 
   disconnect() {
