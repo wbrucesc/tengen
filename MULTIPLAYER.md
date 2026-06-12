@@ -106,3 +106,58 @@ Beginner experience first (Capture Go ✓, group inspector ✓, adaptive handica
 learn path), then **Phase A** as the first multiplayer milestone. The transport
 abstraction above is the only thing we keep in mind while building so the online
 mode drops in without reworking the game loop.
+
+---
+
+## As built (Phase A, shipped)
+
+Phase A is live in `js/transport.js`. Two deviations from the plan above, both
+made because Supabase **Realtime** behaved unreliably in testing:
+
+- **Move delivery is polling, not Realtime.** Postgres change-streaming required
+  the `moves` table to be in the realtime publication (fragile), and Broadcast
+  delivered asymmetrically (host→guest worked, guest→host didn't). So each client
+  **polls** the `games` and `moves` tables every ~1.2s. Deterministic, needs zero
+  replication config — just the tables + RLS from `SUPABASE_SETUP.md`. The ~1.2s
+  latency is fine for turn-based play; revisiting Realtime for snappier updates is
+  a later polish pass.
+- **Opponent-join + game-end** are detected by polling `games.status`
+  (`waiting → playing → done`). Resign writes `status='done'` + `winner`.
+- **Rematch** stays in the same room: a control row is written to `moves`
+  (`color = 0`, `x = nextRound`); both clients pick it up on poll, swap colors
+  (fairness — Black alternates), reset `_lastId` past the old moves, and restart
+  together. No re-hosting / re-entering a code.
+
+`seq` in `moves` is just a unique filler (random int) to satisfy the NOT NULL +
+unique(game_id,seq) constraint; **application order is driven by the auto
+`id`**, which is simpler and race-free.
+
+## TODO: territory endgame scoring sync
+
+Capture Go ends cleanly online (first capture → both sides see the result). The
+**full territory game does not yet sync its endgame**, and this needs to be built
+before territory is playable online.
+
+The problem: after two passes, the game enters *dead-stone marking* — players tap
+groups that are dead (stuck inside enemy territory) to remove them before counting.
+Today each client does this **locally and independently**, so the two players can
+mark different stones and compute different scores. There's no agreement step.
+
+Plan to address it (keeps the polling transport, adds a tiny protocol):
+
+1. **Enter a shared scoring phase.** When `passes >= 2`, both clients already flip
+   to scoring. Mark this in the `games` row (`status='scoring'`) so it's explicit.
+2. **Sync dead-stone toggles.** Reuse the control-row trick: a tap that toggles a
+   group dead writes a control row (e.g. `color = 0`, a kind tag, plus the group's
+   representative point). Both clients apply toggles from the log so their `dead`
+   sets stay identical — same mechanism as moves, same ordering guarantee.
+3. **Two-sided confirmation.** Add an "accept score" action. Each player's accept
+   writes a control row; when **both** have accepted the current dead-set, the game
+   finalizes: write `status='done'` + `winner` + final margin, both show the result.
+   If either keeps editing after accepting, accepts reset (standard "both must agree").
+4. **Optional later:** server-side scoring in a Supabase Edge Function running the
+   real engine, so the final count is authoritative and can't be gamed.
+
+Until this lands, online play should stay on **Capture Go** (the default and the
+beginner on-ramp anyway); territory online can show a "local scoring only" note or
+be gated to pass-&-play / vs-computer.
