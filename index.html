@@ -31,6 +31,17 @@
         <button class="btn chip" data-variant="territory">territory<small>the full game</small></button>
       </div>
 
+      <div id="captarget-row">
+        <h2>win condition</h2>
+        <div class="row" role="group" aria-label="Win condition">
+          <button class="btn chip sel" data-captarget="1">sudden death<small>first capture</small></button>
+          <button class="btn chip" data-captarget="5">first to 5<small>captures</small></button>
+          <button class="btn chip" data-captarget="custom">custom<small>set a goal</small></button>
+        </div>
+        <input id="captarget-input" class="num-input hidden" inputmode="numeric"
+          maxlength="3" placeholder="captures to win" autocomplete="off" />
+      </div>
+
       <h2>board</h2>
       <div class="row" role="group" aria-label="Board size">
         <button class="btn chip sel" data-size="9">9 × 9<small>quick</small></button>

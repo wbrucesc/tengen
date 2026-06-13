@@ -23,6 +23,7 @@ const C = {
 const state = {
   go: null,
   variant: "capture",    // "capture" | "territory"
+  captureTarget: 1,      // capture-go: stones to capture to win (1 = sudden death)
   mode: "computer",      // "computer" | "friend" | "online"
   human: BLACK,          // which color the local player controls
   level: "easy",
@@ -298,7 +299,9 @@ function place(x, y) {
   if (state.transport) {
     state.transport.sendMove(x, y).catch(() => flash("Move may not have sent — check your connection"));
   }
-  if (state.variant === "capture" && res.captures.length) { captureWin(mover); return true; }
+  if (state.variant === "capture" && res.captures.length && go.captures[mover] >= state.captureTarget) {
+    captureWin(mover); return true;
+  }
   afterMove();
   return true;
 }
@@ -323,7 +326,9 @@ function aiMove() {
     if (res.ok) {
       clack(res.captures.length ? "capture" : "place");
       for (const s of res.captures) state.anims.push({ x: s % go.size, y: (s / go.size) | 0, t: performance.now() });
-      if (state.variant === "capture" && res.captures.length) { captureWin(mover); return; }
+      if (state.variant === "capture" && res.captures.length && go.captures[mover] >= state.captureTarget) {
+        captureWin(mover); return;
+      }
     }
   }
   state.busy = false;
@@ -348,7 +353,9 @@ function applyRemoteMove(row) {
   }
   clack(res.captures.length ? "capture" : "place"); buzz(res.captures.length ? 22 : 10);
   for (const s of res.captures) state.anims.push({ x: s % go.size, y: (s / go.size) | 0, t: performance.now() });
-  if (state.variant === "capture" && res.captures.length) { captureWin(mover); return; }
+  if (state.variant === "capture" && res.captures.length && go.captures[mover] >= state.captureTarget) {
+    captureWin(mover); return;
+  }
   updateHud();
   if (go.ended) enterScoring();
 }
@@ -375,6 +382,7 @@ function startRematch({ color }) {
   if (state.go) state.go._resignHandled = false;
   newGame({
     variant: state.variant,
+    captureTarget: state.captureTarget,
     size: state.go.size,
     mode: "online",
     human: color,
@@ -387,10 +395,11 @@ function captureWin(winner) {
   const who = winner === BLACK ? "Black" : "White";
   const youWon = state.mode !== "friend" && winner === state.human;
   buzz(40); clack("capture");
+  const goal = state.captureTarget > 1 ? `reached ${state.captureTarget} captures 🎯` : "first capture 🎯";
   const r2 = $("#score-result2");
-  if (r2) r2.innerHTML = `<span class="win">${who} wins!</span><br>first capture 🎯` +
+  if (r2) r2.innerHTML = `<span class="win">${who} wins!</span><br>${goal}` +
     (state.mode !== "friend"
-      ? `<br><small>${youWon ? "nice — you snagged the first stone!" : (state.mode === "online" ? "your opponent captured first!" : "the computer captured first — go again!")}</small>`
+      ? `<br><small>${youWon ? "nice — you hit the goal first!" : (state.mode === "online" ? "your opponent hit the goal first!" : "the computer got there first — go again!")}</small>`
       : "");
   $("#score-final").classList.add("show");
   updateHud();
@@ -518,7 +527,7 @@ function openLobby(sel) {
   $("#lobby-connecting").style.display = "block";
 
   if (sel.onlineRole === "host") {
-    OnlineTransport.host(sel.size, sel.variant)
+    OnlineTransport.host(sel.size, sel.variant, sel.captureTarget)
       .then((t) => {
         _lobbyTransport = t;
         t.subscribe({
@@ -566,6 +575,7 @@ function launchOnlineGame(transport, settings) {
   state.transport = transport;
   newGame({
     variant: settings.variant,
+    captureTarget: settings.captureTarget ?? 1,
     size: settings.size,
     mode: "online",
     human: transport.myColor,
@@ -593,7 +603,9 @@ function newGame(opts) {
   $("#pass-btn").classList.toggle("gone", cap);
   const obj = $("#objective");
   obj.classList.toggle("show", cap);
-  obj.textContent = "🎯 First to capture a stone wins";
+  obj.textContent = state.captureTarget > 1
+    ? `🎯 First to capture ${state.captureTarget} stones wins`
+    : "🎯 First to capture a stone wins";
 
   const isOnline = state.mode === "online";
   $("#undo-btn").classList.toggle("gone", isOnline);
@@ -622,10 +634,32 @@ function wireUi() {
     const b = e.target.closest(".btn"); if (b) buzz(6);
   });
 
-  let sel = { variant: "capture", size: 9, mode: "computer", level: "easy", human: BLACK, onlineRole: "host", onlineCode: "" };
+  let sel = { variant: "capture", captureTarget: 1, size: 9, mode: "computer", level: "easy", human: BLACK, onlineRole: "host", onlineCode: "" };
 
   document.querySelectorAll("[data-variant]").forEach((b) =>
-    b.addEventListener("click", () => { sel.variant = b.dataset.variant; markGroup("[data-variant]", b); }));
+    b.addEventListener("click", () => {
+      sel.variant = b.dataset.variant; markGroup("[data-variant]", b);
+      $("#captarget-row").classList.toggle("hidden", sel.variant !== "capture");
+    }));
+  document.querySelectorAll("[data-captarget]").forEach((b) =>
+    b.addEventListener("click", () => {
+      markGroup("[data-captarget]", b);
+      const v = b.dataset.captarget;
+      const custom = v === "custom";
+      $("#captarget-input").classList.toggle("hidden", !custom);
+      if (custom) {
+        const n = parseInt($("#captarget-input").value, 10);
+        sel.captureTarget = n >= 1 ? n : 3;
+        $("#captarget-input").focus();
+      } else {
+        sel.captureTarget = parseInt(v, 10);
+      }
+    }));
+  $("#captarget-input").addEventListener("input", (e) => {
+    e.target.value = e.target.value.replace(/[^0-9]/g, "").slice(0, 3);
+    const n = parseInt(e.target.value, 10);
+    sel.captureTarget = n >= 1 ? n : 1;
+  });
   document.querySelectorAll("[data-size]").forEach((b) =>
     b.addEventListener("click", () => { sel.size = +b.dataset.size; markGroup("[data-size]", b); }));
   document.querySelectorAll("[data-mode]").forEach((b) =>
@@ -662,6 +696,7 @@ function wireUi() {
         const code = sel.onlineCode.trim();
         if (code.length !== 6) { flash("Enter the 6-character room code"); return; }
       }
+      if (sel.variant === "capture" && !(sel.captureTarget >= 1)) sel.captureTarget = 1;
       openLobby(sel);
     } else {
       newGame({ ...sel });
@@ -728,7 +763,7 @@ function wireUi() {
       return;
     }
     $("#score-final").classList.remove("show");
-    newGame({ variant: state.variant, size: state.go.size, mode: state.mode, level: state.level, human: state.human });
+    newGame({ variant: state.variant, captureTarget: state.captureTarget, size: state.go.size, mode: state.mode, level: state.level, human: state.human });
   });
   $("#menu-btn").addEventListener("click", () => {
     if (state.transport) { state.transport.disconnect(); state.transport = null; }

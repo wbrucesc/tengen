@@ -40,7 +40,7 @@ export class OnlineTransport {
     this._gameId = gameId;
     this._myColor = myColor;
     this._code = code;
-    this._settings = settings || null; // {size, variant} — filled in for guest
+    this._settings = settings || null; // {size, variant, captureTarget} — filled in for guest
     this._cbs = {};
     this._timer = null;
     this._lastId = 0;        // highest moves.id applied so far
@@ -53,20 +53,22 @@ export class OnlineTransport {
   get code() { return this._code; }
   get settings() { return this._settings; }
 
-  // Host: create a new game in the DB.
-  static async host(size, variant) {
+  // Host: create a new game in the DB. The capture target rides along inside the
+  // `variant` text column (e.g. "capture:5") so no schema change is needed.
+  static async host(size, variant, captureTarget = 1) {
     const c = client(), sid = sessionId();
+    const variantStr = variant === "capture" ? `capture:${captureTarget}` : variant;
     let code, gameId;
     for (let i = 0; i < 5; i++) {
       code = genCode();
       const { data, error } = await c.from("games").insert({
-        code, board_size: size, variant, status: "waiting", black_id: sid,
+        code, board_size: size, variant: variantStr, status: "waiting", black_id: sid,
       }).select("id").single();
       if (!error) { gameId = data.id; break; }
       if (error.code !== "23505") throw new Error(error.message); // unique violation → retry
     }
     if (!gameId) throw new Error("Failed to create room — try again.");
-    return new OnlineTransport(gameId, BLACK, code);
+    return new OnlineTransport(gameId, BLACK, code, { size, variant, captureTarget });
   }
 
   // Guest: look up game by code and claim the white seat.
@@ -82,9 +84,16 @@ export class OnlineTransport {
       .update({ white_id: sid, status: "playing" })
       .eq("id", game.id).eq("status", "waiting");
     if (e2) throw new Error("Could not join — room may be taken.");
+    // Decode the "capture:N" variant string the host stored.
+    let variant = "territory", captureTarget = 1;
+    if (typeof game.variant === "string" && game.variant.startsWith("capture")) {
+      variant = "capture";
+      const n = parseInt(game.variant.split(":")[1], 10);
+      captureTarget = n >= 1 ? n : 1;
+    }
     return new OnlineTransport(
       game.id, WHITE, code.toUpperCase().trim(),
-      { size: game.board_size, variant: game.variant }
+      { size: game.board_size, variant, captureTarget }
     );
   }
 
